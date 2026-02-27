@@ -1,0 +1,469 @@
+import numpy as np
+import pandas as pd
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
+
+from sklearn.base import clone
+from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import (
+    confusion_matrix,
+    recall_score,
+    precision_score,
+    f1_score,
+    roc_auc_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    silhouette_score,
+)
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+
+# =============================================================================
+# 0) MÉTRICAS (OCP): agregas sin tocar runners
+# =============================================================================
+MetricFn = Callable[[np.ndarray, np.ndarray], Dict[str, object]]
+
+def m_accuracy_error() -> Callable:
+    def _m(y, yp, model=None, X=None):
+        cm = confusion_matrix(y, yp)
+        acc = cm.diagonal().sum() / cm.sum() if cm.sum() else np.nan
+        # Nota: ConfusionMatrix es útil, pero es un objeto 2D.
+        # En Streamlit/Arrow no se puede mostrar dentro de un dataframe.
+        # Déjalo en el dict (para quien lo necesite) y filtra al construir tablas.
+        return {"ConfusionMatrix": cm, "Accuracy": float(acc), "Error": float(1 - acc)}
+    return _m
+
+def m_clf_basic(pos_label=1) -> Callable:
+    def _m(y, yp, model=None, X=None):
+        out = {}
+        for k, fn in [("Recall_Pos", recall_score), ("Precision_Pos", precision_score), ("F1_Pos", f1_score)]:
+            try:
+                out[k] = float(fn(y, yp, pos_label=pos_label))
+            except Exception:
+                out[k] = None
+
+        auc = None
+        try:
+            if hasattr(model, "predict_proba"):
+                auc = float(roc_auc_score(y, model.predict_proba(X)[:, 1]))
+            elif hasattr(model, "decision_function"):
+                auc = float(roc_auc_score(y, model.decision_function(X)))
+        except Exception:
+            auc = None
+
+        out["ROC_AUC_Pos"] = auc
+        return out
+    return _m
+
+def m_reg_basic(mape=True) -> Callable:
+    def _m(y, yp, model=None, X=None):
+        y, yp = np.asarray(y), np.asarray(yp)
+        mask = ~(np.isnan(y) | np.isnan(yp))
+        y, yp = y[mask], yp[mask]
+
+        mse = float(mean_squared_error(y, yp)) if len(y) else None
+        out = {
+            "MAE": float(mean_absolute_error(y, yp)) if len(y) else None,
+            "MSE": mse,
+            "RMSE": float(np.sqrt(mse)) if mse is not None else None,
+            "R2": float(r2_score(y, yp)) if len(y) else None,
+        }
+        if mape:
+            denom = np.where(y == 0, np.nan, y)
+            val = np.nanmean(np.abs((y - yp) / denom)) * 100
+            out["MAPE_%"] = float(val) if val == val else None
+        return out
+    return _m
+
+
+# =============================================================================
+# 1) PREPARACIÓN (SRP): prepara X/y, scaling, split
+# =============================================================================
+@dataclass
+class DataPreparer:
+    train_size: float = 0.75
+    random_state: Optional[int] = None
+    scaler: Optional[object] = None
+    scale_X: bool = True
+
+    def __post_init__(self):
+        if self.scaler is None and self.scale_X:
+            self.scaler = StandardScaler()
+
+    def build_xy(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        features: Optional[List[str]] = None,
+        y_transform: Optional[Callable[[pd.Series], np.ndarray]] = None,
+    ):
+        features = features or []
+        X = df.drop(columns=[target]) if not features else df[features]
+        cols = list(X.columns)
+
+        y_series = df[target]
+        y = y_transform(y_series) if y_transform else y_series.values
+        return X, y, cols
+
+    def scale_train_test(
+        self,
+        X_train: pd.DataFrame,
+        X_test: pd.DataFrame,
+        cols: Optional[List[str]] = None,
+        clone_scaler: bool = False,
+    ):
+        if self.scaler is None:
+            return X_train, X_test
+
+        cols = cols or list(X_train.columns)
+        s = clone(self.scaler) if clone_scaler else self.scaler
+
+        X_train = pd.DataFrame(s.fit_transform(X_train), columns=cols, index=X_train.index)
+        X_test = pd.DataFrame(s.transform(X_test), columns=cols, index=X_test.index)
+        return X_train, X_test
+
+    def split(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        features: Optional[List[str]] = None,
+        y_transform: Optional[Callable[[pd.Series], np.ndarray]] = None,
+        stratify: bool = False,
+    ):
+        features = features or []
+        X = df.drop(columns=[target]) if not features else df[features]
+        cols = list(X.columns)
+
+        y_series = df[target]
+        y = y_transform(y_series) if y_transform else y_series.values
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            train_size=self.train_size,
+            random_state=self.random_state,
+            stratify=y if stratify else None,
+        )
+
+        if self.scaler is not None:
+            X_train = pd.DataFrame(self.scaler.fit_transform(X_train), columns=cols, index=X_train.index)
+            X_test = pd.DataFrame(self.scaler.transform(X_test), columns=cols, index=X_test.index)
+
+        return X_train, X_test, y_train, y_test, cols
+
+
+# =============================================================================
+# 2) SUPERVISADO
+# =============================================================================
+class SupervisedRunner:
+    """Entrenamiento + evaluación (clasificación/regresión)."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        model,
+        task: str,  # "classification" | "regression"
+        features: Optional[List[str]] = None,
+        preparer: Optional[DataPreparer] = None,
+        metrics: Optional[List[Callable]] = None,
+        encode_target: bool = False,
+        pos_label: int = 1,
+    ):
+        self.df = df
+        self.target = target
+        self.model = model
+        self.task = task.lower()
+        self.features = features or []
+        self.preparer = preparer if preparer is not None else DataPreparer()
+
+        self.encode_target = encode_target
+        self.pos_label = pos_label
+        self._label_encoder = None
+
+        if metrics is None:
+            if self.task == "classification":
+                self.metrics = [m_accuracy_error(), m_clf_basic(pos_label)]
+            elif self.task == "regression":
+                self.metrics = [m_reg_basic()]
+            else:
+                raise ValueError("task debe ser 'classification' o 'regression'")
+        else:
+            self.metrics = metrics
+
+        self._prepared = False
+
+    def _y_transform(self, y: pd.Series) -> np.ndarray:
+        if self.task == "classification":
+            if self.encode_target and (y.dtype == "object" or str(y.dtype).startswith("category")):
+                self._label_encoder = LabelEncoder()
+                return self._label_encoder.fit_transform(y.values)
+            return y.values
+        return pd.to_numeric(y, errors="coerce").values
+
+    def _use_stratify(self) -> bool:
+        return self.task == "classification"
+
+    def _prepare(self):
+        self.X_train, self.X_test, self.y_train, self.y_test, self.feature_names = self.preparer.split(
+            df=self.df,
+            target=self.target,
+            features=self.features,
+            y_transform=self._y_transform,
+            stratify=self._use_stratify(),
+        )
+        self._prepared = True
+
+    def fit_predict(self) -> np.ndarray:
+        if not self._prepared:
+            self._prepare()
+        self.model.fit(self.X_train, self.y_train)
+        return self.model.predict(self.X_test)
+
+    def evaluate(self) -> Dict[str, object]:
+        yp = self.fit_predict()
+        out: Dict[str, object] = {}
+        for fn in self.metrics:
+            out.update(fn(self.y_test, yp, model=self.model, X=self.X_test))
+        return out
+
+    def evaluate_cv(self, n_splits: int = 10, shuffle: bool = True) -> Dict[str, object]:
+        """KFold/StratifiedKFold con métricas mean/std."""
+        X, y, cols = self.preparer.build_xy(
+            df=self.df,
+            target=self.target,
+            features=self.features,
+            y_transform=self._y_transform,
+        )
+
+        if self.task == "classification":
+            cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
+        else:
+            cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
+
+        fold_metrics: List[Dict[str, object]] = []
+        for tr, te in cv.split(X, y):
+            X_train, X_test = X.iloc[tr].copy(), X.iloc[te].copy()
+            y_train, y_test = y[tr], y[te]
+
+            X_train, X_test = self.preparer.scale_train_test(X_train, X_test, cols=cols, clone_scaler=True)
+
+            model_fold = clone(self.model)
+            model_fold.fit(X_train, y_train)
+            yp = model_fold.predict(X_test)
+
+            out: Dict[str, object] = {}
+            for fn in self.metrics:
+                out.update(fn(y_test, yp, model=model_fold, X=X_test))
+            fold_metrics.append(out)
+
+        df_res = pd.DataFrame(fold_metrics)
+        final: Dict[str, object] = {}
+        for col in df_res.columns:
+            if pd.api.types.is_numeric_dtype(df_res[col]):
+                final[col] = float(df_res[col].mean())
+                final[col + "_std"] = float(df_res[col].std())
+        return final
+
+
+# =============================================================================
+# 3) NO SUPERVISADO (solo lógica; SIN plots)
+# =============================================================================
+class UnsupervisedRunner:
+    """Embeddings / clustering, sin visualización.
+
+    Para graficar usa Visualizer.unsup_*.
+    """
+
+    def __init__(self, name: str, X: pd.DataFrame, model, kind: str, scale_X: bool = True):
+        self.name = name
+        self.kind = kind.lower()
+        self.model = model
+
+        self.X = pd.DataFrame(StandardScaler().fit_transform(X), columns=X.columns) if scale_X else X.copy()
+        self.metrics: Dict[str, object] = {}
+        self.embedding_: Optional[np.ndarray] = None
+        self.labels_: Optional[np.ndarray] = None
+
+        self._handlers = {
+            "pca": self._fit_pca,
+            "umap": self._fit_embedding,
+            "tsne": self._fit_embedding,
+            "kmeans": self._fit_cluster,
+            "hac": self._fit_cluster,
+            "cluster": self._fit_cluster,
+        }
+
+    def fit(self):
+        fn = self._handlers.get(self.kind)
+        if fn is None:
+            raise ValueError("kind válido: pca/umap/tsne o kmeans/hac/cluster")
+        fn()
+        return self
+
+    def _fit_pca(self):
+        self.embedding_ = self.model.fit_transform(self.X)
+        if hasattr(self.model, "explained_variance_ratio_"):
+            v = np.asarray(self.model.explained_variance_ratio_)
+            self.metrics.update(
+                {
+                    "varianza_total": float(v.sum()),
+                    "varianza_pc1_pc2": float(v[:2].sum()),
+                    "n_componentes": int(len(v)),
+                }
+            )
+
+    def _fit_embedding(self):
+        self.embedding_ = self.model.fit_transform(self.X)
+
+    def _fit_cluster(self):
+        if hasattr(self.model, "fit_predict"):
+            self.labels_ = self.model.fit_predict(self.X)
+        else:
+            self.model.fit(self.X)
+            self.labels_ = getattr(self.model, "labels_", None)
+
+        if self.labels_ is not None:
+            self.metrics["silhouette"] = float(silhouette_score(self.X, self.labels_))
+        if hasattr(self.model, "inertia_"):
+            self.metrics["inercia"] = float(self.model.inertia_)
+
+    # --- helpers numéricos (sin plots) ---
+    def ensure_2d_embedding(self):
+        """Si no hay embedding_ (o no es 2D), crea una proyección PCA(2) para visualizar afuera."""
+        if self.embedding_ is None or (isinstance(self.embedding_, np.ndarray) and self.embedding_.shape[1] != 2):
+            self.embedding_ = PCA(n_components=2, random_state=0).fit_transform(self.X)
+        return self.embedding_
+
+    def evaluar_silhouette_en_embedding(self, n_clusters: int = 4):
+        """Silhouette sobre embedding_ usando KMeans temporal."""
+        if self.embedding_ is None:
+            return None
+        lab = KMeans(n_clusters=n_clusters, random_state=0).fit_predict(self.embedding_)
+        return float(silhouette_score(self.embedding_, lab))
+
+
+# ==============================================================================
+# 4) EDAExplorer (solo data; SIN plots)
+# ==============================================================================
+class EDAExplorer:
+    """Carga + limpieza + transformación. (Sin visualización)
+
+    Para graficar: usa Visualizer.eda_* y pásale eda.df.
+    """
+
+    def __init__(self, path: str, modo_csv: int = 1, num=None):
+        if num is not None:
+            modo_csv = num
+        self._df = self._cargar_csv(path, modo_csv)
+
+    @property
+    def df(self) -> pd.DataFrame:
+        return self._df
+
+    @df.setter
+    def df(self, p_df: pd.DataFrame):
+        self._df = p_df
+
+    def _cargar_csv(self, path: str, modo_csv: int) -> pd.DataFrame:
+        if modo_csv == 1:
+            return pd.read_csv(path, sep=",", decimal=".", index_col=0)
+        if modo_csv == 2:
+            return pd.read_csv(path, sep=";", decimal=".")
+        raise ValueError("modo_csv debe ser 1 (sep=',', index_col=0) o 2 (sep=';').")
+
+    # --- perfil / limpieza ---
+    def tipo_datos(self):
+        """Retorna dtypes (antes imprimía)."""
+        return self._df.dtypes
+
+    def solo_numericas(self):
+        self._df = self._df.select_dtypes(include=["number"])
+
+    def a_dummies(self, drop_first: bool = True):
+        cols_cat = self._df.select_dtypes(include=["object", "category"]).columns.tolist()
+        if cols_cat:
+            self._df = pd.get_dummies(self._df, columns=cols_cat, drop_first=drop_first)
+            for c in self._df.columns:
+                if self._df[c].dtype == bool:
+                    self._df[c] = self._df[c].astype(int)
+
+    def eliminar_columnas(self, columnas):
+        idx_name = self._df.index.name
+        columnas = list(columnas)
+        if idx_name is not None and idx_name in columnas:
+            self._df.reset_index(drop=True, inplace=True)
+            columnas = [c for c in columnas if c != idx_name]
+        self._df.drop(columns=columnas, inplace=True, errors="ignore")
+
+    def renombrar_columnas(self, mapping):
+        self._df.rename(columns=mapping, inplace=True)
+
+    def valores_unicos(self, col: str):
+        vc = self._df[col].value_counts(dropna=False)
+        return vc
+
+    def valores_faltantes(self):
+        """Retorna conteo de nulos por columna."""
+        return self._df.isna().sum()
+
+    def eliminarDuplicados(self):
+        self._df.drop_duplicates(inplace=True)
+
+    def eliminarNulos(self):
+        self._df.dropna(inplace=True)
+
+    def resumen_estadistico(self) -> pd.DataFrame:
+        """Retorna describe() para numéricas."""
+        return self._df.describe(include="number")
+
+    # --- features ---
+    def ingenieria_tiempo(self, columna_tiempo: str):
+        if columna_tiempo not in self._df.columns:
+            return
+        self._df[columna_tiempo] = pd.to_datetime(self._df[columna_tiempo], errors="coerce")
+        self._df[f"{columna_tiempo}_Hour"] = self._df[columna_tiempo].dt.hour
+        self._df[f"{columna_tiempo}_DayOfWeek"] = self._df[columna_tiempo].dt.dayofweek
+        self.eliminar_columnas([columna_tiempo])
+
+    # --- correlaciones (data) ---
+    def correlaciones(self) -> pd.DataFrame:
+        return self._df.corr(numeric_only=True)
+
+    def correlacion_con_target(self, target_col: str) -> pd.Series:
+        if target_col not in self._df.columns:
+            raise ValueError(f"'{target_col}' no existe en el DataFrame.")
+        corr = self._df.corr(numeric_only=True)[target_col].drop(target_col, errors="ignore")
+        return corr.sort_values(ascending=False)
+
+    # --- pipelines rápidos ---
+    def analisisCompleto(self, convertir_dummies: bool = True, drop_first: bool = True):
+        """Ejecuta un EDA rápido (calidad + dummies opcional)."""
+        # No imprime: retorna self para chaining.
+        self.eliminarDuplicados()
+        if convertir_dummies:
+            self.a_dummies(drop_first=drop_first)
+        return self
+
+    def analisis(self):
+        """Vista rápida: retorna un dict con shape/head/dtypes."""
+        return {
+            "shape": self._df.shape,
+            "head": self._df.head(),
+            "dtypes": self._df.dtypes,
+        }
+
+
+# =============================================================================
+# Helpers notebook
+# =============================================================================
+def compare_unsupervised(models: List[UnsupervisedRunner], metrics: List[str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [{"modelo": m.name, "tipo": m.kind, **{k: m.metrics.get(k, np.nan) for k in metrics}} for m in models]
+    )
+
+def pick_best(df: pd.DataFrame, metric: str, higher_is_better: bool = True) -> str:
+    idx = df[metric].idxmax() if higher_is_better else df[metric].idxmin()
+    return df.loc[idx, "modelo"]
