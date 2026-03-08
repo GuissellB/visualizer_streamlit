@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from sklearn.base import clone
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, KFold, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     confusion_matrix,
@@ -153,6 +153,65 @@ class DataPreparer:
 
         return X_train, X_test, y_train, y_test, cols
 
+    # --- tiempo / forecasting ---
+    def build_lagged_xy(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        lags: int = 12,
+        features: Optional[List[str]] = None,
+    ):
+        if target not in df.columns:
+            raise ValueError(f"'{target}' no existe en el DataFrame.")
+        if not isinstance(lags, int) or lags <= 0:
+            raise ValueError("lags debe ser un entero positivo.")
+
+        features = features or []
+        for c in features:
+            if c not in df.columns:
+                raise ValueError(f"Feature '{c}' no existe en el DataFrame.")
+
+        X = pd.DataFrame(index=df.index)
+        for i in range(1, lags + 1):
+            X[f"{target}_lag_{i}"] = df[target].shift(i)
+
+        for c in features:
+            if c == target:
+                continue
+            X[c] = df[c]
+
+        y = pd.to_numeric(df[target], errors="coerce")
+        mask = ~(X.isna().any(axis=1) | y.isna())
+        X = X.loc[mask]
+        y = y.loc[mask]
+
+        return X, y.values, list(X.columns)
+
+    def split_time_xy(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        test_size: Optional[int] = None,
+    ):
+        n = len(X)
+        if n < 2:
+            raise ValueError("Se requieren al menos 2 observaciones para split temporal.")
+
+        if test_size is None:
+            test_size = max(1, int(round(n * (1 - self.train_size))))
+        if not isinstance(test_size, int) or test_size <= 0 or test_size >= n:
+            raise ValueError("test_size debe ser entero en [1, n-1].")
+
+        cut = n - test_size
+        X_train, X_test = X.iloc[:cut].copy(), X.iloc[cut:].copy()
+        y_train, y_test = y[:cut], y[cut:]
+
+        if self.scaler is not None:
+            X_train = pd.DataFrame(self.scaler.fit_transform(X_train), columns=X.columns, index=X_train.index)
+            X_test = pd.DataFrame(self.scaler.transform(X_test), columns=X.columns, index=X_test.index)
+
+        return X_train, X_test, y_train, y_test, list(X.columns)
+
 
 # =============================================================================
 # 2) SUPERVISADO
@@ -171,6 +230,7 @@ class SupervisedRunner:
         metrics: Optional[List[Callable]] = None,
         encode_target: bool = False,
         pos_label: int = 1,
+        class_weight: Optional[object] = None,
     ):
         self.df = df
         self.target = target
@@ -182,6 +242,7 @@ class SupervisedRunner:
         self.encode_target = encode_target
         self.pos_label = pos_label
         self._label_encoder = None
+        self.class_weight = class_weight
 
         if metrics is None:
             if self.task == "classification":
@@ -194,6 +255,30 @@ class SupervisedRunner:
             self.metrics = metrics
 
         self._prepared = False
+
+        if self.task == "classification" and self.class_weight is not None:
+            self._set_class_weight_if_supported(self.model, self.class_weight)
+
+    @staticmethod
+    def _set_class_weight_if_supported(model, class_weight: object = None):
+        if class_weight is None:
+            return model
+
+        try:
+            params = model.get_params(deep=True)
+        except Exception:
+            return model
+
+        keys = []
+        if "class_weight" in params:
+            keys.append("class_weight")
+        keys.extend([k for k in params.keys() if k.endswith("__class_weight")])
+
+        if not keys:
+            return model
+
+        model.set_params(**{k: class_weight for k in keys})
+        return model
 
     def _y_transform(self, y: pd.Series) -> np.ndarray:
         if self.task == "classification":
@@ -269,7 +354,152 @@ class SupervisedRunner:
 
 
 # =============================================================================
-# 3) NO SUPERVISADO (solo lógica; SIN plots)
+# 3) SERIES TEMPORALES (forecast tabular/autoregresivo)
+# =============================================================================
+class TimeSeriesRunner:
+    """Entrenamiento + evaluación para forecasting (sin plots).
+
+    Enfoque:
+    - Convierte serie a problema supervisado por lags.
+    - Split temporal (sin shuffle).
+    - Backtesting con TimeSeriesSplit.
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        model,
+        lags: int = 12,
+        features: Optional[List[str]] = None,
+        preparer: Optional[DataPreparer] = None,
+        metrics: Optional[List[Callable]] = None,
+        test_size: Optional[int] = None,
+    ):
+        self.df = df.copy()
+        self.target = target
+        self.model = model
+        self.lags = lags
+        self.features = features or []
+        self.preparer = preparer if preparer is not None else DataPreparer()
+        self.metrics = metrics if metrics is not None else [m_reg_basic()]
+        self.test_size = test_size
+
+        self._prepared = False
+        self._fitted_full = False
+        self._last_observed: Optional[pd.Series] = None
+        self.feature_names: List[str] = []
+
+    def _prepare(self):
+        X, y, cols = self.preparer.build_lagged_xy(
+            df=self.df,
+            target=self.target,
+            lags=self.lags,
+            features=self.features,
+        )
+        self.X_train, self.X_test, self.y_train, self.y_test, self.feature_names = self.preparer.split_time_xy(
+            X, y, test_size=self.test_size
+        )
+        self._prepared = True
+
+    def fit_predict(self) -> np.ndarray:
+        if not self._prepared:
+            self._prepare()
+        self.model.fit(self.X_train, self.y_train)
+        return self.model.predict(self.X_test)
+
+    def evaluate(self) -> Dict[str, object]:
+        yp = self.fit_predict()
+        out: Dict[str, object] = {}
+        for fn in self.metrics:
+            out.update(fn(self.y_test, yp, model=self.model, X=self.X_test))
+        return out
+
+    def evaluate_cv(
+        self,
+        n_splits: int = 5,
+        test_size: Optional[int] = None,
+        gap: int = 0,
+    ) -> Dict[str, object]:
+        X, y, cols = self.preparer.build_lagged_xy(
+            df=self.df,
+            target=self.target,
+            lags=self.lags,
+            features=self.features,
+        )
+        cv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size, gap=gap)
+
+        fold_metrics: List[Dict[str, object]] = []
+        for tr, te in cv.split(X):
+            X_train, X_test = X.iloc[tr].copy(), X.iloc[te].copy()
+            y_train, y_test = y[tr], y[te]
+
+            X_train, X_test = self.preparer.scale_train_test(X_train, X_test, cols=cols, clone_scaler=True)
+
+            model_fold = clone(self.model)
+            model_fold.fit(X_train, y_train)
+            yp = model_fold.predict(X_test)
+
+            out: Dict[str, object] = {}
+            for fn in self.metrics:
+                out.update(fn(y_test, yp, model=model_fold, X=X_test))
+            fold_metrics.append(out)
+
+        df_res = pd.DataFrame(fold_metrics)
+        final: Dict[str, object] = {}
+        for col in df_res.columns:
+            if pd.api.types.is_numeric_dtype(df_res[col]):
+                final[col] = float(df_res[col].mean())
+                final[col + "_std"] = float(df_res[col].std())
+        return final
+
+    def fit_full(self):
+        """Entrena con toda la serie laggeada (útil para forecast futuro)."""
+        X, y, cols = self.preparer.build_lagged_xy(
+            df=self.df,
+            target=self.target,
+            lags=self.lags,
+            features=self.features,
+        )
+
+        if self.preparer.scaler is not None:
+            X = pd.DataFrame(self.preparer.scaler.fit_transform(X), columns=cols, index=X.index)
+
+        self.model.fit(X, y)
+        self._last_observed = pd.to_numeric(self.df[self.target], errors="coerce").dropna()
+        self._fitted_full = True
+        return self
+
+    def forecast(self, steps: int = 1) -> np.ndarray:
+        """Forecast recursivo univariado (solo lags del target)."""
+        if self.features:
+            raise ValueError("forecast recursivo solo soporta target univariado (features vacías).")
+        if not self._fitted_full:
+            self.fit_full()
+        if self._last_observed is None or len(self._last_observed) < self.lags:
+            raise ValueError("No hay suficiente historial para forecast.")
+        if not isinstance(steps, int) or steps <= 0:
+            raise ValueError("steps debe ser entero positivo.")
+
+        history = list(self._last_observed.values.astype(float))
+        preds: List[float] = []
+
+        for _ in range(steps):
+            lags_row = [history[-i] for i in range(1, self.lags + 1)]
+            X_next = pd.DataFrame([lags_row], columns=[f"{self.target}_lag_{i}" for i in range(1, self.lags + 1)])
+
+            if self.preparer.scaler is not None:
+                X_next = pd.DataFrame(self.preparer.scaler.transform(X_next), columns=X_next.columns, index=X_next.index)
+
+            y_hat = float(self.model.predict(X_next)[0])
+            preds.append(y_hat)
+            history.append(y_hat)
+
+        return np.asarray(preds)
+
+
+# =============================================================================
+# 4) NO SUPERVISADO (solo lógica; SIN plots)
 # =============================================================================
 class UnsupervisedRunner:
     """Embeddings / clustering, sin visualización.
@@ -346,7 +576,7 @@ class UnsupervisedRunner:
 
 
 # ==============================================================================
-# 4) EDAExplorer (solo data; SIN plots)
+# 5) EDAExplorer (solo data; SIN plots)
 # ==============================================================================
 class EDAExplorer:
     """Carga + limpieza + transformación. (Sin visualización)

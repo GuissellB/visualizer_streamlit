@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 # Tus imports (usa el toolkit limpio si lo estás usando)
 # Si tu archivo se llama ml_toolkit_refactored_clean.py, cambia el import a ese.
@@ -24,6 +25,41 @@ TARGET = "Result"
 RANDOM_STATE = 42
 N_SPLITS = 10
 SEMILLAS = [1, 7, 21, 42, 99]
+CLASS_WEIGHT = "balanced"
+DEFAULT_BEST_MODEL_CRITERION = "ROC_AUC_CV_mean"
+BEST_MODEL_CRITERIA = [
+    "ROC_AUC_CV_mean",
+    "F1_CV_mean",
+    "Accuracy_CV_mean",
+    "ROC_AUC_Global",
+    "F1_Global",
+    "Accuracy_Global",
+]
+
+
+def crear_modelo(nombre: str, random_state: int):
+    if nombre == "Regresión Logística":
+        return LogisticRegression(random_state=random_state, solver="liblinear")
+    if nombre == "Random Forest":
+        return RandomForestClassifier(n_estimators=100, max_depth=8, random_state=random_state)
+    if nombre == "XGBoost":
+        return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)
+    if nombre == "LightGBM":
+        return LGBMClassifier(random_state=random_state)
+    if nombre == "SVM":
+        return SVC(probability=True, random_state=random_state)
+    raise ValueError("Modelo no reconocido")
+
+
+def _score_positivo(model, X):
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if proba.ndim == 2 and proba.shape[1] >= 2:
+            return proba[:, 1]
+        return np.ravel(proba)
+    if hasattr(model, "decision_function"):
+        return model.decision_function(X)
+    return None
 
 st.set_page_config(page_title="EDA + Modelos (HTML replica)", layout="wide")
 st.title("EDA + Resultados de Modelos")
@@ -62,12 +98,14 @@ def load_and_prepare(csv_name: str) -> pd.DataFrame:
 #       lo reconstruimos dentro usando csv_name + params.
 # =========================
 @st.cache_data(show_spinner=False)
-def compute_model_results(csv_name: str, target: str, random_state: int, n_splits: int) -> pd.DataFrame:
+def compute_model_results(
+    csv_name: str, target: str, random_state: int, n_splits: int, best_model_criterion: str
+) -> pd.DataFrame:
     df_local = load_and_prepare(csv_name)
 
     modelos = [
         ("Regresión Logística",
-         LogisticRegression(random_state=random_state, solver="liblinear", class_weight="balanced")),
+         LogisticRegression(random_state=random_state, solver="liblinear")),
         ("Random Forest",
          RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)),
         ("XGBoost",
@@ -94,7 +132,8 @@ def compute_model_results(csv_name: str, target: str, random_state: int, n_split
             model=modelo,
             task="classification",
             preparer=prep,
-            pos_label=1
+            pos_label=1,
+            class_weight=CLASS_WEIGHT,
         )
 
         m = runner.evaluate()
@@ -119,25 +158,12 @@ def compute_model_results(csv_name: str, target: str, random_state: int, n_split
             "ROC_AUC_CV_std": cv.get("ROC_AUC_Pos_std"),
         })
 
-    return pd.DataFrame(resultados).sort_values("ROC_AUC_Global", ascending=False).reset_index(drop=True)
+    return pd.DataFrame(resultados).sort_values(best_model_criterion, ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
 def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: list, n_splits: int) -> pd.DataFrame:
     df_local = load_and_prepare(csv_name)
-
-    def crear_modelo(nombre: str, random_state: int):
-        if nombre == "Regresión Logística":
-            return LogisticRegression(random_state=random_state, solver="liblinear", class_weight="balanced")
-        if nombre == "Random Forest":
-            return RandomForestClassifier(n_estimators=100, max_depth=8, random_state=random_state)
-        if nombre == "XGBoost":
-            return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)
-        if nombre == "LightGBM":
-            return LGBMClassifier(random_state=random_state)
-        if nombre == "SVM":
-            return SVC(probability=True, random_state=random_state)
-        raise ValueError("Modelo no reconocido")
 
     resultados_stab = []
     for seed in seeds:
@@ -156,7 +182,8 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
             model=model,
             task="classification",
             preparer=prep,
-            pos_label=1
+            pos_label=1,
+            class_weight=CLASS_WEIGHT,
         )
 
         m = runner.evaluate()
@@ -177,6 +204,57 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
         })
 
     return pd.DataFrame(resultados_stab).sort_values("F1", ascending=False).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def compute_best_model_balance_compare(
+    csv_name: str, target: str, best_model_name: str, seed: int
+):
+    df_local = load_and_prepare(csv_name)
+    estandarizar = best_model_name in ["Regresión Logística", "SVM"]
+
+    scenarios = [
+        ("Sin balanceo", None),
+        ("Con balanceo", CLASS_WEIGHT),
+    ]
+
+    resultados = []
+    curvas = {}
+    y_true_roc = None
+
+    for nombre_escenario, cw in scenarios:
+        model = crear_modelo(best_model_name, random_state=seed)
+        prep = DataPreparer(
+            train_size=0.75,
+            random_state=seed,
+            scale_X=estandarizar
+        )
+        runner = SupervisedRunner(
+            df=df_local,
+            target=target,
+            model=model,
+            task="classification",
+            preparer=prep,
+            pos_label=1,
+            class_weight=cw,
+        )
+
+        metricas = runner.evaluate()
+        resultados.append({
+            "Escenario": nombre_escenario,
+            "Accuracy": metricas.get("Accuracy"),
+            "Recall": metricas.get("Recall_Pos"),
+            "Precision": metricas.get("Precision_Pos"),
+            "F1": metricas.get("F1_Pos"),
+            "ROC_AUC": metricas.get("ROC_AUC_Pos"),
+        })
+
+        y_score = _score_positivo(runner.model, runner.X_test)
+        if y_score is not None:
+            curvas[nombre_escenario] = (runner.y_test, y_score)
+            y_true_roc = runner.y_test
+
+    return pd.DataFrame(resultados), curvas, y_true_roc
 
 
 # =========================
@@ -217,16 +295,38 @@ if menu == "EDA":
 # =========================
 if menu == "Resultados modelos":
     st.header("Resultados de modelos")
+    criterio_mejor_modelo = st.selectbox(
+        "Criterio para seleccionar mejor modelo",
+        options=BEST_MODEL_CRITERIA,
+        index=BEST_MODEL_CRITERIA.index(DEFAULT_BEST_MODEL_CRITERION),
+    )
 
     # 1) Tabla comparación (cacheada)
     with st.spinner("Cargando resultados cacheados (si es la primera vez, entrena)..."):
-        resultados_df = compute_model_results(CSV_NAME, TARGET, RANDOM_STATE, N_SPLITS)
+        resultados_df = compute_model_results(
+            CSV_NAME, TARGET, RANDOM_STATE, N_SPLITS, criterio_mejor_modelo
+        )
 
     st.subheader("Tabla de comparación de modelos")
     st.dataframe(resultados_df.round(4), use_container_width=True)
 
+    resumen_criterios = []
+    for crit in BEST_MODEL_CRITERIA:
+        if crit in resultados_df.columns:
+            top = resultados_df.sort_values(crit, ascending=False).iloc[0]
+            resumen_criterios.append(
+                {
+                    "Criterio": crit,
+                    "Mejor modelo": top["Modelo"],
+                    "Valor": top[crit],
+                }
+            )
+    if resumen_criterios:
+        st.markdown("### Variación del mejor modelo según criterio")
+        st.dataframe(pd.DataFrame(resumen_criterios).round(4), use_container_width=True)
+
     mejor_nombre = resultados_df.iloc[0]["Modelo"]
-    st.success(f"Mejor modelo según ROC_AUC: {mejor_nombre}")
+    st.success(f"Mejor modelo según {criterio_mejor_modelo}: {mejor_nombre}")
 
     # 2) Estabilidad (cacheada)
     st.subheader("Estabilidad por semilla (mejor modelo)")
@@ -238,3 +338,20 @@ if menu == "Resultados modelos":
 
     st.markdown("### === RESUMEN ESTADÍSTICO ===")
     st.dataframe(stab_df.describe().round(4), use_container_width=True)
+
+    mejor_seed = int(stab_df.iloc[0]["Seed"])
+    st.info(f"Mejor semilla según estabilidad: {mejor_seed}")
+
+    st.subheader("Mejor modelo (mejor semilla): con vs sin balanceo")
+    with st.spinner("Comparando mejor modelo (mejor semilla) con y sin balanceo..."):
+        balance_df, curvas_roc, _ = compute_best_model_balance_compare(
+            CSV_NAME, TARGET, mejor_nombre, mejor_seed
+        )
+
+    st.dataframe(balance_df.round(4), use_container_width=True)
+
+    fig_roc = viz.sup_plot_roc_compare(curvas_roc, title=f"Comparación Curva ROC - {mejor_nombre}")
+    if fig_roc is not None:
+        st.pyplot(fig_roc)
+    else:
+        st.info("No fue posible generar curva ROC para este modelo.")

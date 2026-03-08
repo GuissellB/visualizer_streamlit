@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.decomposition import PCA
+from sklearn.metrics import roc_auc_score, roc_curve
 from scipy.cluster.hierarchy import linkage, dendrogram
 
 
@@ -35,6 +36,65 @@ class Visualizer:
     # ---------------------------------------------------------------------
     # EDA (desde EDAExplorer)
     # ---------------------------------------------------------------------
+    @staticmethod
+    def sup_plot_roc( y_true: Sequence, y_score: Sequence, label: str = "Modelo", title: str = "Curva ROC", linestyle: str = "-",):
+        y_true = np.asarray(y_true)
+        y_score = np.asarray(y_score)
+        if y_true.shape[0] != y_score.shape[0] or y_true.shape[0] == 0:
+            return None
+
+        fpr, tpr, _ = roc_curve(y_true, y_score)
+        auc_score = roc_auc_score(y_true, y_score)
+
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
+        ax.plot(fpr, tpr, linestyle=linestyle, label=f"{label} (AUC = {auc_score:.4f})")
+        ax.plot([0, 1], [0, 1], "g--", label="Azar")
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.05)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(title)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc="lower right")
+        fig.tight_layout()
+        return fig
+
+    @staticmethod
+    def sup_plot_roc_compare(curves: Dict[str, Tuple[Sequence, Sequence]],title: str = "Comparación Curva ROC",):
+        if not curves:
+            return None
+
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
+        plotted = 0
+        for name, pair in curves.items():
+            if pair is None or len(pair) != 2:
+                continue
+            y_true, y_score = pair
+            y_true = np.asarray(y_true)
+            y_score = np.asarray(y_score)
+            if y_true.shape[0] != y_score.shape[0] or y_true.shape[0] == 0:
+                continue
+
+            fpr, tpr, _ = roc_curve(y_true, y_score)
+            auc_score = roc_auc_score(y_true, y_score)
+            ax.plot(fpr, tpr, label=f"{name} (AUC = {auc_score:.4f})")
+            plotted += 1
+
+        if plotted == 0:
+            plt.close(fig)
+            return None
+
+        ax.plot([0, 1], [0, 1], "g--", label="Azar")
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.05)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(title)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc="lower right")
+        fig.tight_layout()
+        return fig
+
     @staticmethod
     def eda_boxplots(df: pd.DataFrame):
         cols = Visualizer._numeric_cols(df)
