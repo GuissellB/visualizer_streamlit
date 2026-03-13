@@ -6,9 +6,35 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from pathlib import Path
+import numpy as np
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    confusion_matrix,
+    roc_curve,
+    precision_recall_curve,
+)
+
+from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner
+
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+
 TARGET_COL = "Result"
 DATA_PATH = "Phishing_Websites_Data.csv"
-
+RANDOM_STATE = 42
+N_SPLITS = 10
+SEMILLAS = [1, 7, 21, 42, 99]
+CLASS_WEIGHT = "balanced"
+DEFAULT_BEST_MODEL_CRITERION = "ROC_AUC_CV_mean"
 
 @st.cache_data
 def load_eda_data(path: str):
@@ -64,6 +90,187 @@ def load_eda_data(path: str):
     }
 
     return df, summary, corr_with_target, pie_df
+
+def crear_modelo(nombre: str, random_state: int):
+    if nombre == "Regresión Logística":
+        return LogisticRegression(random_state=random_state, solver="liblinear")
+    if nombre == "Random Forest":
+        return RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)
+    if nombre == "XGBoost":
+        return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)
+    if nombre == "LightGBM":
+        return LGBMClassifier(random_state=random_state)
+    if nombre == "SVM":
+        return SVC(kernel="rbf", probability=True, random_state=random_state)
+    raise ValueError(f"Modelo no reconocido: {nombre}")
+
+
+def _score_positivo(model, X):
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if proba.ndim == 2 and proba.shape[1] >= 2:
+            return proba[:, 1]
+        return np.ravel(proba)
+    if hasattr(model, "decision_function"):
+        return model.decision_function(X)
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_model_df(csv_name: str) -> pd.DataFrame:
+    base_dir = Path(__file__).resolve().parent
+    csv_path = base_dir / csv_name
+    if not csv_path.exists():
+        raise FileNotFoundError(f"No encontré {csv_name} en {base_dir}")
+
+    eda = EDAExplorer(str(csv_path), num=1)
+
+    # Igual que en streamlit_app.py
+    eda.df[TARGET_COL] = eda.df[TARGET_COL].map({-1: 0, 1: 1}).astype(int)
+    eda.valores_faltantes()
+    eda.eliminarDuplicados()
+    eda.eliminarNulos()
+    eda.analisisCompleto()
+
+    return eda.df
+
+
+@st.cache_data(show_spinner=False)
+def compute_model_results_dashboard(
+    csv_name: str, target: str, random_state: int, n_splits: int
+) -> pd.DataFrame:
+    df_local = load_model_df(csv_name)
+
+    modelos = [
+        ("Regresión Logística", LogisticRegression(random_state=random_state, solver="liblinear")),
+        ("Random Forest", RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)),
+        ("SVM", SVC(kernel="rbf", probability=True, random_state=random_state)),
+    ]
+
+    # Si tienes instalados XGBoost y LightGBM, descomenta:
+    modelos.extend([
+        ("XGBoost", XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)),
+        ("LightGBM", LGBMClassifier(random_state=random_state)),
+    ])
+
+    resultados = []
+    for nombre, modelo in modelos:
+        estandarizar = nombre in ["Regresión Logística", "SVM"]
+
+        prep = DataPreparer(
+            train_size=0.75,
+            random_state=random_state,
+            scale_X=estandarizar
+        )
+
+        runner = SupervisedRunner(
+            df=df_local,
+            target=target,
+            model=modelo,
+            task="classification",
+            preparer=prep,
+            pos_label=1,
+            class_weight=CLASS_WEIGHT,
+        )
+
+        m = runner.evaluate()
+        cv = runner.evaluate_cv(n_splits=n_splits)
+
+        resultados.append({
+            "Modelo": nombre,
+            "Accuracy_Global": m.get("Accuracy"),
+            "F1_Global": m.get("F1_Pos"),
+            "ROC_AUC_Global": m.get("ROC_AUC_Pos"),
+            "Accuracy_CV_mean": cv.get("Accuracy"),
+            "Accuracy_CV_std": cv.get("Accuracy_std"),
+            "F1_CV_mean": cv.get("F1_Pos"),
+            "F1_CV_std": cv.get("F1_Pos_std"),
+            "ROC_AUC_CV_mean": cv.get("ROC_AUC_Pos"),
+            "ROC_AUC_CV_std": cv.get("ROC_AUC_Pos_std"),
+        })
+
+    return pd.DataFrame(resultados).sort_values(
+        DEFAULT_BEST_MODEL_CRITERION, ascending=False
+    ).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def compute_best_model_dashboard(
+    csv_name: str,
+    target: str,
+    best_model_name: str,
+    seed: int,
+):
+    df_local = load_model_df(csv_name)
+
+    model = crear_modelo(best_model_name, random_state=seed)
+    estandarizar = best_model_name in ["Regresión Logística", "SVM"]
+
+    prep = DataPreparer(
+        train_size=0.75,
+        random_state=seed,
+        scale_X=estandarizar
+    )
+
+    runner = SupervisedRunner(
+    df=df_local,
+    target=target,
+    model=model,
+    task="classification",
+    preparer=prep,
+    pos_label=1,
+    class_weight=CLASS_WEIGHT,
+    )
+
+    y_pred = runner.fit_predict()
+
+    y_true = runner.y_test
+    y_score = _score_positivo(runner.model, runner.X_test)
+
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, pos_label=1, zero_division=0)
+    rec = recall_score(y_true, y_pred, pos_label=1, zero_division=0)
+    f1 = f1_score(y_true, y_pred, pos_label=1, zero_division=0)
+
+    try:
+        auc = roc_auc_score(y_true, y_score) if y_score is not None else None
+    except Exception:
+        auc = None
+
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+
+    roc_payload = None
+    pr_payload = None
+
+    if y_score is not None:
+        fpr, tpr, _ = roc_curve(y_true, y_score)
+        precision_curve, recall_curve, _ = precision_recall_curve(y_true, y_score)
+
+        roc_payload = pd.DataFrame({"fpr": fpr, "tpr": tpr})
+        pr_payload = pd.DataFrame({"recall": recall_curve, "precision": precision_curve})
+
+    return {
+        "best_model_name": best_model_name,
+        "seed": seed,
+        "metrics": {
+            "accuracy": acc,
+            "precision": prec,
+            "recall": rec,
+            "f1": f1,
+            "roc_auc": auc,
+            "specificity": tn / (tn + fp) if (tn + fp) > 0 else 0,
+            "error_rate": (fp + fn) / (tp + tn + fp + fn),
+        },
+        "confusion": {
+            "TP": int(tp),
+            "FP": int(fp),
+            "TN": int(tn),
+            "FN": int(fn),
+        },
+        "roc_df": roc_payload,
+        "pr_df": pr_payload,
+        "test_size": int(len(y_true)),
+    }
 
 st.set_page_config(
     page_title="Phishing Detection Dashboard",
@@ -483,7 +690,75 @@ def panel_open(title: str, subtitle: str = "", extra_class: str = "") -> None:
 def panel_close() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 df_eda, eda_summary, feature_importance_real, pie_df_real = load_eda_data(DATA_PATH)
+
+model_results_df = compute_model_results_dashboard(DATA_PATH, TARGET_COL, RANDOM_STATE, N_SPLITS)
+best_model_name = model_results_df.iloc[0]["Modelo"]
+
+best_model_payload = compute_best_model_dashboard(
+    DATA_PATH,
+    TARGET_COL,
+    best_model_name,
+    RANDOM_STATE,
+)
+@st.cache_data(show_spinner=False)
+def get_best_model_row(results_df: pd.DataFrame) -> dict:
+    return results_df.iloc[0].to_dict()
+
+
+@st.cache_data(show_spinner=False)
+def get_best_model_params_dict(best_model_name: str, seed: int) -> pd.DataFrame:
+    model = crear_modelo(best_model_name, random_state=seed)
+    params = model.get_params()
+
+    param_whitelist = {
+        "Regresión Logística": [
+            "C", "solver", "penalty", "max_iter", "class_weight", "random_state"
+        ],
+        "Random Forest": [
+            "n_estimators", "max_depth", "min_samples_split", "min_samples_leaf",
+            "max_features", "class_weight", "random_state"
+        ],
+        "SVM": [
+            "C", "kernel", "gamma", "probability", "class_weight", "random_state"
+        ],
+        "XGBoost": [
+            "n_estimators", "max_depth", "learning_rate", "subsample",
+            "colsample_bytree", "objective", "eval_metric", "random_state"
+        ],
+        "LightGBM": [
+            "n_estimators", "learning_rate", "max_depth", "num_leaves",
+            "subsample", "colsample_bytree", "objective", "class_weight", "random_state"
+        ],
+    }
+
+    selected_keys = param_whitelist.get(best_model_name, list(params.keys()))
+
+    rows = []
+    for key in selected_keys:
+        if key in params:
+            rows.append({
+                "Parámetro": key,
+                "Valor": str(params[key])
+            })
+
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(show_spinner=False)
+def get_real_feature_columns(csv_name: str, target: str) -> list:
+    df_local = load_model_df(csv_name)
+    return [c for c in df_local.columns if c != target]
+
+real_metrics = best_model_payload["metrics"]
+real_confusion = best_model_payload["confusion"]
+real_roc_df = best_model_payload["roc_df"]
+real_pr_df = best_model_payload["pr_df"]
+best_model_row = get_best_model_row(model_results_df)
+best_model_params_df = get_best_model_params_dict(best_model_name, RANDOM_STATE)
+real_feature_cols = get_real_feature_columns(DATA_PATH, TARGET_COL)
+
 # =========================
 # Sidebar
 # =========================
@@ -681,87 +956,94 @@ if page == "EDA - Análisis Exploratorio":
 elif page == "Rendimiento del Algoritmo":
     hero(
         "Rendimiento del Algoritmo",
-        "Métricas detalladas del desempeño del modelo de detección.",
+        f"Métricas reales del mejor modelo seleccionado: {best_model_name}.",
     )
 
-    cols = st.columns(5)
+    cols = st.columns(5, gap="medium")
     metrics = [
-        ("Exactitud (Accuracy)", f"{ACCURACY:.2f}%", "Desempeño global", "#4f46e5"),
-        ("Precisión (Precision)", f"{PRECISION:.2f}%", "Control de falsos positivos", "#10b981"),
-        ("Sensibilidad (Recall)", f"{RECALL:.2f}%", "Detección de phishing", "#2563eb"),
-        ("F1-Score", f"{F1:.2f}%", "Balance precisión-recall", "#7c3aed"),
-        ("Especificidad", f"{SPECIFICITY:.2f}%", "Detección de legítimos", "#f59e0b"),
+        ("Exactitud (Accuracy)", f"{real_metrics['accuracy'] * 100:.2f}%", "Desempeño global", "#4f46e5"),
+        ("Precisión (Precision)", f"{real_metrics['precision'] * 100:.2f}%", "Control de falsos positivos", "#10b981"),
+        ("Sensibilidad (Recall)", f"{real_metrics['recall'] * 100:.2f}%", "Detección de phishing", "#2563eb"),
+        ("F1-Score", f"{real_metrics['f1'] * 100:.2f}%", "Balance precisión-recall", "#7c3aed"),
+        ("Especificidad", f"{real_metrics['specificity'] * 100:.2f}%", "Detección de legítimos", "#f59e0b"),
     ]
     for col, m in zip(cols, metrics):
         with col:
             metric_card(*m)
 
-    roc_col, pr_col = st.columns(2)
+    roc_col, pr_col = st.columns(2, gap="large")
 
     with roc_col:
-        panel_open("Curva ROC (Receiver Operating Characteristic)", "AUC (Área Bajo la Curva): 0.987")
-        roc_fig = go.Figure()
-        roc_fig.add_trace(
-            go.Scatter(
-                x=roc_df["fpr"],
-                y=roc_df["tpr"],
-                mode="lines+markers",
-                name="ROC Curve",
-                line=dict(width=4, color="#2563eb"),
-                marker=dict(size=7, color="#7c3aed"),
+        panel_open(
+            "Curva ROC (Receiver Operating Characteristic)",
+            f"AUC (Área Bajo la Curva): {real_metrics['roc_auc']:.3f}" if real_metrics["roc_auc"] is not None else "AUC no disponible",
+        )
+        if real_roc_df is not None:
+            roc_fig = go.Figure()
+            roc_fig.add_trace(
+                go.Scatter(
+                    x=real_roc_df["fpr"],
+                    y=real_roc_df["tpr"],
+                    mode="lines",
+                    name="ROC Curve",
+                    line=dict(width=4, color="#2563eb"),
+                )
             )
-        )
-        roc_fig.add_trace(
-            go.Scatter(
-                x=[0, 1],
-                y=[0, 1],
-                mode="lines",
-                name="Random Classifier",
-                line=dict(width=2, dash="dash", color="rgba(100,116,139,0.8)"),
+            roc_fig.add_trace(
+                go.Scatter(
+                    x=[0, 1],
+                    y=[0, 1],
+                    mode="lines",
+                    name="Random Classifier",
+                    line=dict(width=2, dash="dash", color="rgba(100,116,139,0.8)"),
+                )
             )
-        )
-        roc_fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            xaxis_title="Tasa de Falsos Positivos (FPR)",
-            yaxis_title="Tasa de Verdaderos Positivos (TPR)",
-            xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-            yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-        )
-        st.plotly_chart(roc_fig, width="stretch")
+            roc_fig.update_layout(
+                height=380,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(248,250,252,0.92)",
+                xaxis_title="Tasa de Falsos Positivos (FPR)",
+                yaxis_title="Tasa de Verdaderos Positivos (TPR)",
+                xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+                yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+            )
+            st.plotly_chart(roc_fig, width="stretch", config={"displayModeBar": False})
+        else:
+            st.info("No fue posible calcular la curva ROC para este modelo.")
         panel_close()
 
     with pr_col:
-        panel_open("Curva Precision-Recall", "AP (Average Precision): 0.934")
-        pr_fig = go.Figure()
-        pr_fig.add_trace(
-            go.Scatter(
-                x=pr_df["recall"],
-                y=pr_df["precision"],
-                mode="lines+markers",
-                name="PR Curve",
-                line=dict(width=4, color="#10b981"),
-                marker=dict(size=7, color="#06b6d4"),
-                fill="tozeroy",
-                fillcolor="rgba(16,185,129,0.12)",
+        panel_open("Curva Precision-Recall", "Curva calculada sobre el conjunto de prueba.")
+        if real_pr_df is not None:
+            pr_fig = go.Figure()
+            pr_fig.add_trace(
+                go.Scatter(
+                    x=real_pr_df["recall"],
+                    y=real_pr_df["precision"],
+                    mode="lines",
+                    name="PR Curve",
+                    line=dict(width=4, color="#10b981"),
+                    fill="tozeroy",
+                    fillcolor="rgba(16,185,129,0.12)",
+                )
             )
-        )
-        pr_fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            xaxis_title="Recall (Sensibilidad)",
-            yaxis_title="Precision",
-            xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-            yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-        )
-        st.plotly_chart(pr_fig, width="stretch")
+            pr_fig.update_layout(
+                height=380,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(248,250,252,0.92)",
+                xaxis_title="Recall",
+                yaxis_title="Precision",
+                xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+                yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+            )
+            st.plotly_chart(pr_fig, width="stretch", config={"displayModeBar": False})
+        else:
+            st.info("No fue posible calcular la curva Precision-Recall para este modelo.")
         panel_close()
 
-    panel_open("Matriz de confusión", f"Basada en {TOTAL:,} websites analizados.")
+    panel_open("Matriz de confusión", f"Basada en {best_model_payload['test_size']:,} registros del conjunto de prueba.")
 
     left_spacer, center_block, right_spacer = st.columns([0.12, 0.76, 0.12])
 
@@ -784,10 +1066,7 @@ elif page == "Rendimiento del Algoritmo":
                 "<div style='height:168px;display:flex;align-items:center;justify-content:flex-end;font-weight:800;color:#334155;font-size:1rem;'>Real: Phishing</div>",
                 unsafe_allow_html=True,
             )
-            st.markdown(
-                "<div style='height:20px;'></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
             st.markdown(
                 "<div style='height:168px;display:flex;align-items:center;justify-content:flex-end;font-weight:800;color:#334155;font-size:1rem;'>Real: Legítimo</div>",
                 unsafe_allow_html=True,
@@ -798,23 +1077,23 @@ elif page == "Rendimiento del Algoritmo":
 
             with a:
                 st.markdown(
-                    f"<div class='cm-box' style='background:#dcfce7;border:2px solid #22c55e;color:#166534;'><div style='font-size:2rem'>{confusion['TP']}</div><div>Verdaderos Positivos</div><div class='small-muted'>{confusion['TP']/TOTAL*100:.2f}%</div></div>",
+                    f"<div class='cm-box' style='background:#dcfce7;border:2px solid #22c55e;color:#166534;'><div style='font-size:2rem'>{real_confusion['TP']}</div><div>Verdaderos Positivos</div><div class='small-muted'>{real_confusion['TP']/best_model_payload['test_size']*100:.2f}%</div></div>",
                     unsafe_allow_html=True,
                 )
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
                 st.markdown(
-                    f"<div class='cm-box' style='background:#ffedd5;border:2px solid #f59e0b;color:#9a3412;'><div style='font-size:2rem'>{confusion['FP']}</div><div>Falsos Positivos</div><div class='small-muted'>{confusion['FP']/TOTAL*100:.2f}%</div></div>",
+                    f"<div class='cm-box' style='background:#ffedd5;border:2px solid #f59e0b;color:#9a3412;'><div style='font-size:2rem'>{real_confusion['FP']}</div><div>Falsos Positivos</div><div class='small-muted'>{real_confusion['FP']/best_model_payload['test_size']*100:.2f}%</div></div>",
                     unsafe_allow_html=True,
                 )
 
             with b:
                 st.markdown(
-                    f"<div class='cm-box' style='background:#fee2e2;border:2px solid #ef4444;color:#991b1b;'><div style='font-size:2rem'>{confusion['FN']}</div><div>Falsos Negativos</div><div class='small-muted'>{confusion['FN']/TOTAL*100:.2f}%</div></div>",
+                    f"<div class='cm-box' style='background:#fee2e2;border:2px solid #ef4444;color:#991b1b;'><div style='font-size:2rem'>{real_confusion['FN']}</div><div>Falsos Negativos</div><div class='small-muted'>{real_confusion['FN']/best_model_payload['test_size']*100:.2f}%</div></div>",
                     unsafe_allow_html=True,
                 )
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
                 st.markdown(
-                    f"<div class='cm-box' style='background:#dbeafe;border:2px solid #3b82f6;color:#1d4ed8;'><div style='font-size:2rem'>{confusion['TN']}</div><div>Verdaderos Negativos</div><div class='small-muted'>{confusion['TN']/TOTAL*100:.2f}%</div></div>",
+                    f"<div class='cm-box' style='background:#dbeafe;border:2px solid #3b82f6;color:#1d4ed8;'><div style='font-size:2rem'>{real_confusion['TN']}</div><div>Verdaderos Negativos</div><div class='small-muted'>{real_confusion['TN']/best_model_payload['test_size']*100:.2f}%</div></div>",
                     unsafe_allow_html=True,
                 )
 
@@ -828,7 +1107,7 @@ elif page == "Rendimiento del Algoritmo":
             <div class="panel metric-panel">
                 <h3>Falsos Negativos</h3>
                 <div class="sub">Phishing no detectado (crítico).</div>
-                <div class="metric-panel-value" style="color:#ef4444;">{confusion['FN']}</div>
+                <div class="metric-panel-value" style="color:#ef4444;">{real_confusion['FN']}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -840,7 +1119,7 @@ elif page == "Rendimiento del Algoritmo":
             <div class="panel metric-panel">
                 <h3>Falsos Positivos</h3>
                 <div class="sub">Website legítimo marcado como phishing.</div>
-                <div class="metric-panel-value" style="color:#f59e0b;">{confusion['FP']}</div>
+                <div class="metric-panel-value" style="color:#f59e0b;">{real_confusion['FP']}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -852,120 +1131,82 @@ elif page == "Rendimiento del Algoritmo":
             <div class="panel metric-panel">
                 <h3>Tasa de Error Total</h3>
                 <div class="sub">Porcentaje total de clasificaciones incorrectas.</div>
-                <div class="metric-panel-value" style="color:#2563eb;">{ERROR_RATE:.3f}%</div>
+                <div class="metric-panel-value" style="color:#2563eb;">{real_metrics['error_rate'] * 100:.3f}%</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+    panel_open("Comparación de modelos", "Ranking de modelos según ROC_AUC_CV_mean.")
+    st.dataframe(model_results_df.round(4), width="stretch", hide_index=True)
+    panel_close()
+# =========================
+# Página 3: Parámetros
+# =========================
 # =========================
 # Página 3: Parámetros
 # =========================
 else:
     hero(
         "Parametrización del Modelo",
-        "Configuración e hiperparámetros del modelo.",
+        f"Configuración real del mejor modelo seleccionado: {best_model_name}.",
     )
 
-    panel_open("Información del modelo", model_config["algorithm"])
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1:
-        metric_card("Versión", model_config["version"], "Modelo desplegado", "#2563eb")
+        metric_card("Modelo ganador", best_model_name, "Seleccionado por desempeño CV", "#2563eb")
     with c2:
-        metric_card("Fecha de entrenamiento", model_config["training_date"], "Último training completo", "#7c3aed")
+        metric_card("Semilla", str(RANDOM_STATE), "Reproducibilidad", "#7c3aed")
     with c3:
-        metric_card("Última actualización", model_config["last_update"], "Refresh de configuración", "#06b6d4")
+        metric_card("Cross-Validation", f"{N_SPLITS}-fold", "Evaluación cruzada", "#06b6d4")
     with c4:
-        metric_card("Estado", model_config["status"], "Modelo activo en producción", "#10b981")
-    panel_close()
+        metric_card("Class Weight", str(CLASS_WEIGHT), "Balance de clases", "#10b981")
 
-    panel_open("Hiperparámetros del Random Forest", "Tabla base del modelo activo.")
-    st.dataframe(hyperparameters, width="stretch", hide_index=True)
-    panel_close()
+    panel_open("Resumen de selección del modelo", "Información usada para elegir el modelo ganador.")
+    s1, s2, s3 = st.columns(3, gap="medium")
 
-    panel_open("Feature Engineering (47 Features)", "Variables extraídas y utilizadas por el modelo.")
-    fg_cols = st.columns(2)
-    items = list(feature_groups.items())
-    half = math.ceil(len(items) / 2)
-    chunks = [items[:half], items[half:]]
-    for col, chunk in zip(fg_cols, chunks):
-        with col:
-            for group_name, feats in chunk:
-                pills = "".join([f"<span class='pill'>{feat}</span>" for feat in feats])
-                st.markdown(
-                    f"""
-                    <div class="panel" style="padding:1rem; margin-bottom:0.8rem;">
-                        <h3 style="font-size:1rem; margin-bottom:0.55rem;">{group_name}</h3>
-                        <div>{pills}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-    panel_close()
-
-    panel_open("Métricas de entrenamiento", "Resumen del proceso de entrenamiento y validación.")
-    tm_cols = st.columns(3)
-    for idx, (label, value) in enumerate(training_metrics):
-        with tm_cols[idx % 3]:
-            st.markdown(
-                f"""
-                <div class="metric-card" style="min-height:110px; margin-bottom:0.8rem;">
-                    <div class="metric-label">{label}</div>
-                    <div class="metric-value" style="font-size:1.4rem;">{value}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    panel_close()
-
-    panel_open("Configuración de umbral de decisión", "Comparación rápida de distintos thresholds de clasificación.")
-    st.markdown(
-        """
-        <div style="background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(251,191,36,0.16)); border:1px solid rgba(245,158,11,0.22); border-radius:18px; padding:1rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-                <div>
-                    <div style="font-weight:800; color:#854d0e;">Umbral Actual de Clasificación</div>
-                    <div style="color:#a16207; font-size:0.92rem; margin-top:0.18rem;">Websites con probabilidad &gt; 0.65 son clasificados como phishing.</div>
-                </div>
-                <div style="background:#f59e0b; color:white; padding:0.35rem 0.75rem; border-radius:999px; font-weight:800;">0.65</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    t1, t2, t3 = st.columns(3)
-    with t1:
+    with s1:
         st.markdown(
-            """
-            <div class="threshold-card">
-                <div class="metric-label">Umbral Conservador</div>
-                <div class="metric-value" style="color:#ef4444;">0.50</div>
-                <div class="metric-sub">Más detecciones, más falsos positivos</div>
+            f"""
+            <div class="panel metric-panel">
+                <h3>Criterio principal</h3>
+                <div class="sub">Métrica usada para ordenar el ranking.</div>
+                <div class="metric-panel-value" style="color:#2563eb;">{DEFAULT_BEST_MODEL_CRITERION}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with t2:
+
+    with s2:
         st.markdown(
-            """
-            <div class="threshold-card active">
-                <div class="metric-label" style="color:#1e3a8a;">Umbral Balanceado</div>
-                <div class="metric-value" style="color:#2563eb;">0.65</div>
-                <div class="metric-sub" style="color:#1d4ed8;">Balance óptimo actual</div>
+            f"""
+            <div class="panel metric-panel">
+                <h3>ROC_AUC_CV_mean</h3>
+                <div class="sub">Valor promedio del mejor modelo en validación cruzada.</div>
+                <div class="metric-panel-value" style="color:#7c3aed;">{best_model_row['ROC_AUC_CV_mean']:.4f}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with t3:
+
+    with s3:
         st.markdown(
-            """
-            <div class="threshold-card">
-                <div class="metric-label">Umbral Estricto</div>
-                <div class="metric-value" style="color:#10b981;">0.80</div>
-                <div class="metric-sub">Alta precisión, menos sensibilidad</div>
+            f"""
+            <div class="panel metric-panel">
+                <h3>Accuracy_CV_mean</h3>
+                <div class="sub">Exactitud promedio del mejor modelo en validación cruzada.</div>
+                <div class="metric-panel-value" style="color:#06b6d4;">{best_model_row['Accuracy_CV_mean']:.4f}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    panel_close()
+
+    panel_open("Hiperparámetros reales del modelo ganador", "Parámetros obtenidos directamente desde get_params().")
+    st.dataframe(best_model_params_df, width="stretch", hide_index=True)
+    panel_close()
+
+    panel_open("Variables utilizadas por el modelo", f"Dataset actual con {len(real_feature_cols)} features predictoras.")
+    feature_df = pd.DataFrame({"Feature": real_feature_cols})
+    st.dataframe(feature_df, width="stretch", hide_index=True)
     panel_close()
