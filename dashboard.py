@@ -1206,7 +1206,3 @@ else:
     st.dataframe(best_model_params_df, width="stretch", hide_index=True)
     panel_close()
 
-    panel_open("Variables utilizadas por el modelo", f"Dataset actual con {len(real_feature_cols)} features predictoras.")
-    feature_df = pd.DataFrame({"Feature": real_feature_cols})
-    st.dataframe(feature_df, width="stretch", hide_index=True)
-    panel_close()
