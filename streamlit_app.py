@@ -121,10 +121,12 @@ def compute_model_results(
             task="classification",
             preparer=prep,
             pos_label=1,
+            # Esta bandera activa el balanceo en el toolkit cuando el modelo soporta class_weight.
             class_weight=CLASS_WEIGHT,
         )
 
         m = runner.evaluate()
+        # Esta llamada ejecuta la validación cruzada de clasificación dentro del toolkit.
         cv = runner.evaluate_cv(n_splits=n_splits)
 
         resultados.append({
@@ -172,10 +174,12 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
             task="classification",
             preparer=prep,
             pos_label=1,
+            # Reutiliza el mismo balanceo por class_weight definido para clasificación.
             class_weight=CLASS_WEIGHT,
         )
 
         m = runner.evaluate()
+        # La estabilidad por semilla también usa validación cruzada del toolkit.
         cv = runner.evaluate_cv(n_splits=n_splits)
 
         # EXACTO como el HTML (solo columnas que tú agregas)
@@ -226,6 +230,7 @@ def compute_best_model_balance_compare(
             task="classification",
             preparer=prep,
             pos_label=1,
+            # Aquí se compara explícitamente el modelo con y sin balanceo.
             class_weight=cw,
         )
 

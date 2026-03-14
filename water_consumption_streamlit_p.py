@@ -242,7 +242,9 @@ def analyze_time_series(
             test_size=test_size,
         )
 
+        # Holdout: una sola partición temporal train/test para medir error final.
         holdout = runner.evaluate()
+        # Cross-validation temporal: varios cortes con TimeSeriesSplit dentro del toolkit.
         cv = runner.evaluate_cv(n_splits=n_splits, test_size=cv_test_size)
         runner.fit_full()
         future = runner.forecast(steps=forecast_steps)
@@ -409,6 +411,7 @@ def render_eda_page(data: pd.DataFrame, df_raw: pd.DataFrame, date_col: str, tar
             ],
         }
     )
+    info_df["Valor"] = info_df["Valor"].astype(str)
     st.dataframe(info_df, width="stretch", hide_index=True)
     with st.expander("Vista previa del dataset"):
         st.dataframe(data.head(30), width="stretch")

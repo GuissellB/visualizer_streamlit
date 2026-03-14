@@ -138,10 +138,12 @@ def compute_model_results_dashboard(
             task="classification",
             preparer=prep,
             pos_label=1,
+            # Esta opción delega el balanceo al toolkit vía class_weight.
             class_weight=CLASS_WEIGHT,
         )
 
         m = runner.evaluate()
+        # La comparación de modelos usa validación cruzada de clasificación del toolkit.
         cv = runner.evaluate_cv(n_splits=n_splits)
 
         resultados.append({
@@ -188,6 +190,7 @@ def compute_best_model_dashboard(
     task="classification",
     preparer=prep,
     pos_label=1,
+    # La evaluación detallada también conserva el balanceo configurado para clasificación.
     class_weight=CLASS_WEIGHT,
     )
 

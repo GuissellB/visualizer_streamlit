@@ -336,9 +336,12 @@ class SupervisedRunner:
         self._prepared = False
 
         if self.task == "classification" and self.class_weight is not None:
+            # El balanceo se activa aquí: si el modelo soporta class_weight,
+            # el runner le inyecta el valor recibido desde la app.
             self._set_class_weight_if_supported(self.class_weight)
 
     def _set_class_weight_if_supported(self, class_weight: object = None):
+        # Aplica class_weight a modelos de clasificación que exponen ese parámetro.
         if class_weight is None:
             return self.model
 
@@ -402,8 +405,11 @@ class SupervisedRunner:
         )
 
         if self.task == "classification":
+            # En clasificación la validación cruzada usa folds estratificados
+            # para conservar la proporción de clases en cada partición.
             cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
         else:
+            # En regresión usa KFold estándar porque no hay clases que estratificar.
             cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
 
         fold_metrics: List[Dict[str, object]] = []
@@ -523,6 +529,8 @@ class TimeSeriesRunner:
     ) -> Dict[str, object]:
         if self._uses_series_forecaster():
             # Backtesting temporal para ARIMA/Holt-Winters sin convertir la serie a lags.
+            # Aquí la validación cruzada se hace con TimeSeriesSplit:
+            # cada fold entrena con pasado y prueba con futuro.
             series = pd.to_numeric(self.df[self.target], errors="coerce").dropna().reset_index(drop=True)
             cv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size, gap=gap)
 
@@ -554,6 +562,8 @@ class TimeSeriesRunner:
             lags=self.lags,
             features=self.features,
         )
+        # Para modelos por lags también se usa TimeSeriesSplit,
+        # manteniendo el orden temporal del dataset.
         cv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size, gap=gap)
 
         fold_metrics: List[Dict[str, object]] = []
