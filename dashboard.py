@@ -2,8 +2,6 @@ import math
 from datetime import datetime
 
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 from pathlib import Path
@@ -23,7 +21,8 @@ from sklearn.metrics import (
     precision_recall_curve,
 )
 
-from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner
+from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner, get_positive_score
+from visualizer import Visualizer
 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -38,14 +37,13 @@ DEFAULT_BEST_MODEL_CRITERION = "ROC_AUC_CV_mean"
 
 @st.cache_data
 def load_eda_data(path: str):
-    df = pd.read_csv(path)
-
-    # Limpieza básica para EDA
-    df = df.copy()
+    # Carga el dataset con EDAExplorer del toolkit y prepara el resumen usado en la página EDA.
+    eda = EDAExplorer(path, num=1)
+    df = eda.df.copy()
 
     total_rows = len(df)
     total_cols = df.shape[1]
-    null_count = int(df.isna().sum().sum())
+    null_count = int(eda.valores_faltantes().sum())
     dup_count = int(df.duplicated().sum())
 
     if TARGET_COL not in df.columns:
@@ -59,25 +57,6 @@ def load_eda_data(path: str):
     # Ratio simple entre clases
     ratio_text = f"1:{round(legit_count / phishing_count)}" if phishing_count > 0 else "N/A"
 
-    # Correlación absoluta con target para Top Features
-    numeric_df = df.select_dtypes(include=["number"]).copy()
-    corr_with_target = (
-        numeric_df.corr(numeric_only=True)[TARGET_COL]
-        .drop(TARGET_COL)
-        .abs()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    corr_with_target.columns = ["feature", "importance"]
-
-    pie_df = pd.DataFrame(
-        {
-            "tipo": ["Legítimo", "Phishing"],
-            "cantidad": [legit_count, phishing_count],
-        }
-    )
-
     # Resumen opcional para usar luego
     summary = {
         "total_rows": total_rows,
@@ -89,9 +68,10 @@ def load_eda_data(path: str):
         "ratio_text": ratio_text,
     }
 
-    return df, summary, corr_with_target, pie_df
+    return df, summary
 
 def crear_modelo(nombre: str, random_state: int):
+    # Centraliza la construcción de modelos para reutilizarla en ranking y evaluación detallada.
     if nombre == "Regresión Logística":
         return LogisticRegression(random_state=random_state, solver="liblinear")
     if nombre == "Random Forest":
@@ -105,19 +85,9 @@ def crear_modelo(nombre: str, random_state: int):
     raise ValueError(f"Modelo no reconocido: {nombre}")
 
 
-def _score_positivo(model, X):
-    if hasattr(model, "predict_proba"):
-        proba = model.predict_proba(X)
-        if proba.ndim == 2 and proba.shape[1] >= 2:
-            return proba[:, 1]
-        return np.ravel(proba)
-    if hasattr(model, "decision_function"):
-        return model.decision_function(X)
-    return None
-
-
 @st.cache_data(show_spinner=False)
 def load_model_df(csv_name: str) -> pd.DataFrame:
+    # Aplica la preparación base con EDAExplorer para que el dashboard use la misma data del modelado.
     base_dir = Path(__file__).resolve().parent
     csv_path = base_dir / csv_name
     if not csv_path.exists():
@@ -125,12 +95,9 @@ def load_model_df(csv_name: str) -> pd.DataFrame:
 
     eda = EDAExplorer(str(csv_path), num=1)
 
-    # Igual que en streamlit_app.py
+    # Mantiene la misma preparación que streamlit_app.py para que el dashboard y el app usen la misma base.
     eda.df[TARGET_COL] = eda.df[TARGET_COL].map({-1: 0, 1: 1}).astype(int)
-    eda.valores_faltantes()
-    eda.eliminarDuplicados()
-    eda.eliminarNulos()
-    eda.analisisCompleto()
+    eda.eliminarDuplicados().eliminarNulos().analisisCompleto()
 
     return eda.df
 
@@ -139,6 +106,7 @@ def load_model_df(csv_name: str) -> pd.DataFrame:
 def compute_model_results_dashboard(
     csv_name: str, target: str, random_state: int, n_splits: int
 ) -> pd.DataFrame:
+    # Compara modelos con SupervisedRunner del toolkit y devuelve la tabla base del ranking.
     df_local = load_model_df(csv_name)
 
     modelos = [
@@ -201,6 +169,7 @@ def compute_best_model_dashboard(
     best_model_name: str,
     seed: int,
 ):
+    # Evalúa en detalle el mejor modelo y arma las salidas que luego usa la página de rendimiento.
     df_local = load_model_df(csv_name)
 
     model = crear_modelo(best_model_name, random_state=seed)
@@ -225,7 +194,7 @@ def compute_best_model_dashboard(
     y_pred = runner.fit_predict()
 
     y_true = runner.y_test
-    y_score = _score_positivo(runner.model, runner.X_test)
+    y_score = get_positive_score(runner.model, runner.X_test)
 
     acc = accuracy_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred, pos_label=1, zero_division=0)
@@ -653,9 +622,10 @@ st.markdown(
 )
 
 # =========================
-# Helpers
+# Renderiza bloques visuales del dashboard
 # =========================
 def hero(title: str, subtitle: str) -> None:
+    # Renderiza el bloque principal de cabecera en cada página del dashboard.
     st.markdown(
         f"""
         <div class="hero">
@@ -668,6 +638,7 @@ def hero(title: str, subtitle: str) -> None:
 
 
 def metric_card(label: str, value: str, sub: str, color: str = "#162033") -> None:
+    # Renderiza una tarjeta compacta de métrica con el estilo visual del dashboard.
     st.markdown(
         f"""
         <div class="metric-card">
@@ -680,7 +651,30 @@ def metric_card(label: str, value: str, sub: str, color: str = "#162033") -> Non
     )
 
 
+def metric_panel_card(title: str, subtitle: str, value: str, color: str) -> None:
+    # Renderiza una tarjeta ampliada para resúmenes y métricas destacadas.
+    st.markdown(
+        f"""
+        <div class="panel metric-panel">
+            <h3>{title}</h3>
+            <div class="sub">{subtitle}</div>
+            <div class="metric-panel-value" style="color:{color};">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def confusion_box(value: int, label: str, percent: float, background: str, border: str, color: str) -> None:
+    # Renderiza una celda visual de la matriz de confusión usando HTML/CSS del dashboard.
+    st.markdown(
+        f"<div class='cm-box' style='background:{background};border:2px solid {border};color:{color};'><div style='font-size:2rem'>{value}</div><div>{label}</div><div class='small-muted'>{percent:.2f}%</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def panel_open(title: str, subtitle: str = "", extra_class: str = "") -> None:
+    # Abre un contenedor visual reutilizable para secciones del dashboard.
     st.markdown(
         f'<div class="panel {extra_class}"><h3>{title}</h3><div class="sub">{subtitle}</div>',
         unsafe_allow_html=True,
@@ -688,10 +682,11 @@ def panel_open(title: str, subtitle: str = "", extra_class: str = "") -> None:
 
 
 def panel_close() -> None:
+    # Cierra el contenedor HTML abierto con panel_open.
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-df_eda, eda_summary, feature_importance_real, pie_df_real = load_eda_data(DATA_PATH)
+df_eda, eda_summary = load_eda_data(DATA_PATH)
 
 model_results_df = compute_model_results_dashboard(DATA_PATH, TARGET_COL, RANDOM_STATE, N_SPLITS)
 best_model_name = model_results_df.iloc[0]["Modelo"]
@@ -758,11 +753,13 @@ real_pr_df = best_model_payload["pr_df"]
 best_model_row = get_best_model_row(model_results_df)
 best_model_params_df = get_best_model_params_dict(best_model_name, RANDOM_STATE)
 real_feature_cols = get_real_feature_columns(DATA_PATH, TARGET_COL)
+viz = Visualizer()
 
 # =========================
 # Sidebar
 # =========================
 with st.sidebar:
+    # La barra lateral solo controla navegación; el contenido de cada página se calcula abajo.
     st.markdown("## 🛡️ Phishing Detection")
     st.caption("Dashboard Analytics")
     page = st.radio(
@@ -791,6 +788,7 @@ with st.sidebar:
 # Página 1: EDA
 # =========================
 if page == "EDA - Análisis Exploratorio":
+    # Página EDA: usa Visualizer para gráficos y métricas resumidas del dataset cargado.
     hero(
         "Análisis Exploratorio de Datos (EDA)",
         "Insights y patrones identificados en el dataset de websites.",
@@ -834,44 +832,9 @@ if page == "EDA - Análisis Exploratorio":
             "Correlación absoluta con la variable objetivo (Result).",
         )
 
-        fig = px.bar(
-            feature_importance_real.sort_values("importance"),
-            x="importance",
-            y="feature",
-            orientation="h",
-            text=feature_importance_real.sort_values("importance")["importance"].map(lambda x: f"{x:.2f}"),
-            color="importance",
-            color_continuous_scale=["#60a5fa", "#7c3aed"],
-        )
-
-        fig.update_traces(
-            textposition="inside",
-            marker_line_width=0,
-            cliponaxis=False,
-            insidetextanchor="end",
-        )
-
-        fig.update_yaxes(automargin=True)
-        fig.update_xaxes(range=[0, float(feature_importance_real["importance"].max()) * 1.05])
-
-        fig.update_layout(
-            height=390,
-            margin=dict(l=20, r=20, t=10, b=20),
-            coloraxis_showscale=False,
-            xaxis=dict(
-                title="Correlación absoluta",
-                showgrid=True,
-                gridcolor="rgba(148,163,184,0.18)",
-                zeroline=False,
-            ),
-            yaxis=dict(
-                title="",
-                showgrid=False,
-                automargin=True,
-            ),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(248,250,252,0.92)",
-            font=dict(color="#1e293b"),
+        fig = viz.top_target_correlation_bar(
+            df_eda,
+            target_col=TARGET_COL,
         )
 
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
@@ -880,31 +843,9 @@ if page == "EDA - Análisis Exploratorio":
     with right:
         panel_open("Distribución general", "Balance real entre clases del dataset.")
 
-        fig_pie = px.pie(
-            pie_df_real,
-            names="tipo",
-            values="cantidad",
-            hole=0.68,
-            color="tipo",
-            color_discrete_map={"Legítimo": "#2563eb", "Phishing": "#7c3aed"},
-        )
-
-        fig_pie.update_traces(textinfo="percent+label", textposition="inside")
-
-        fig_pie.update_layout(
-            height=390,
-            margin=dict(l=15, r=15, t=10, b=15),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(248,250,252,0.92)",
-            font=dict(color="#1e293b"),
-            legend=dict(
-                orientation="h",
-                y=-0.08,
-                x=0.5,
-                xanchor="center",
-            ),
-            uniformtext_minsize=12,
-            uniformtext_mode="hide",
+        fig_pie = viz.target_distribution_donut(
+            df_eda,
+            target_col=TARGET_COL,
         )
 
         st.plotly_chart(fig_pie, width="stretch", config={"displayModeBar": False})
@@ -914,46 +855,20 @@ if page == "EDA - Análisis Exploratorio":
     q1, q2, q3 = st.columns(3, gap="medium")
 
     with q1:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Valores nulos</h3>
-                <div class="sub">Conteo total de valores faltantes.</div>
-                <div class="metric-panel-value" style="color:#10b981;">{eda_summary['null_count']}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Valores nulos", "Conteo total de valores faltantes.", str(eda_summary["null_count"]), "#10b981")
 
     with q2:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Duplicados</h3>
-                <div class="sub">Filas repetidas detectadas en el dataset.</div>
-                <div class="metric-panel-value" style="color:#f59e0b;">{eda_summary['dup_count']:,}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Duplicados", "Filas repetidas detectadas en el dataset.", f"{eda_summary['dup_count']:,}", "#f59e0b")
 
     with q3:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Variable objetivo</h3>
-                <div class="sub">Columna usada como clase a predecir.</div>
-                <div class="metric-panel-value" style="color:#2563eb;">{TARGET_COL}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Variable objetivo", "Columna usada como clase a predecir.", TARGET_COL, "#2563eb")
     panel_close()
 
 # =========================
 # Página 2: Performance
 # =========================
 elif page == "Rendimiento del Algoritmo":
+    # Página de rendimiento: combina métricas, curvas y tablas derivadas del toolkit.
     hero(
         "Rendimiento del Algoritmo",
         f"Métricas reales del mejor modelo seleccionado: {best_model_name}.",
@@ -979,34 +894,9 @@ elif page == "Rendimiento del Algoritmo":
             f"AUC (Área Bajo la Curva): {real_metrics['roc_auc']:.3f}" if real_metrics["roc_auc"] is not None else "AUC no disponible",
         )
         if real_roc_df is not None:
-            roc_fig = go.Figure()
-            roc_fig.add_trace(
-                go.Scatter(
-                    x=real_roc_df["fpr"],
-                    y=real_roc_df["tpr"],
-                    mode="lines",
-                    name="ROC Curve",
-                    line=dict(width=4, color="#2563eb"),
-                )
-            )
-            roc_fig.add_trace(
-                go.Scatter(
-                    x=[0, 1],
-                    y=[0, 1],
-                    mode="lines",
-                    name="Random Classifier",
-                    line=dict(width=2, dash="dash", color="rgba(100,116,139,0.8)"),
-                )
-            )
-            roc_fig.update_layout(
-                height=380,
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(248,250,252,0.92)",
-                xaxis_title="Tasa de Falsos Positivos (FPR)",
-                yaxis_title="Tasa de Verdaderos Positivos (TPR)",
-                xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-                yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+            roc_fig = viz.roc_curve_plot(
+                real_roc_df,
+                auc_value=real_metrics["roc_auc"],
             )
             st.plotly_chart(roc_fig, width="stretch", config={"displayModeBar": False})
         else:
@@ -1016,27 +906,8 @@ elif page == "Rendimiento del Algoritmo":
     with pr_col:
         panel_open("Curva Precision-Recall", "Curva calculada sobre el conjunto de prueba.")
         if real_pr_df is not None:
-            pr_fig = go.Figure()
-            pr_fig.add_trace(
-                go.Scatter(
-                    x=real_pr_df["recall"],
-                    y=real_pr_df["precision"],
-                    mode="lines",
-                    name="PR Curve",
-                    line=dict(width=4, color="#10b981"),
-                    fill="tozeroy",
-                    fillcolor="rgba(16,185,129,0.12)",
-                )
-            )
-            pr_fig.update_layout(
-                height=380,
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(248,250,252,0.92)",
-                xaxis_title="Recall",
-                yaxis_title="Precision",
-                xaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
-                yaxis=dict(gridcolor="rgba(148,163,184,0.18)"),
+            pr_fig = viz.precision_recall_plot(
+                real_pr_df,
             )
             st.plotly_chart(pr_fig, width="stretch", config={"displayModeBar": False})
         else:
@@ -1076,66 +947,27 @@ elif page == "Rendimiento del Algoritmo":
             a, b = st.columns(2, gap="medium")
 
             with a:
-                st.markdown(
-                    f"<div class='cm-box' style='background:#dcfce7;border:2px solid #22c55e;color:#166534;'><div style='font-size:2rem'>{real_confusion['TP']}</div><div>Verdaderos Positivos</div><div class='small-muted'>{real_confusion['TP']/best_model_payload['test_size']*100:.2f}%</div></div>",
-                    unsafe_allow_html=True,
-                )
+                confusion_box(real_confusion["TP"], "Verdaderos Positivos", real_confusion["TP"] / best_model_payload["test_size"] * 100, "#dcfce7", "#22c55e", "#166534")
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div class='cm-box' style='background:#ffedd5;border:2px solid #f59e0b;color:#9a3412;'><div style='font-size:2rem'>{real_confusion['FP']}</div><div>Falsos Positivos</div><div class='small-muted'>{real_confusion['FP']/best_model_payload['test_size']*100:.2f}%</div></div>",
-                    unsafe_allow_html=True,
-                )
+                confusion_box(real_confusion["FP"], "Falsos Positivos", real_confusion["FP"] / best_model_payload["test_size"] * 100, "#ffedd5", "#f59e0b", "#9a3412")
 
             with b:
-                st.markdown(
-                    f"<div class='cm-box' style='background:#fee2e2;border:2px solid #ef4444;color:#991b1b;'><div style='font-size:2rem'>{real_confusion['FN']}</div><div>Falsos Negativos</div><div class='small-muted'>{real_confusion['FN']/best_model_payload['test_size']*100:.2f}%</div></div>",
-                    unsafe_allow_html=True,
-                )
+                confusion_box(real_confusion["FN"], "Falsos Negativos", real_confusion["FN"] / best_model_payload["test_size"] * 100, "#fee2e2", "#ef4444", "#991b1b")
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div class='cm-box' style='background:#dbeafe;border:2px solid #3b82f6;color:#1d4ed8;'><div style='font-size:2rem'>{real_confusion['TN']}</div><div>Verdaderos Negativos</div><div class='small-muted'>{real_confusion['TN']/best_model_payload['test_size']*100:.2f}%</div></div>",
-                    unsafe_allow_html=True,
-                )
+                confusion_box(real_confusion["TN"], "Verdaderos Negativos", real_confusion["TN"] / best_model_payload["test_size"] * 100, "#dbeafe", "#3b82f6", "#1d4ed8")
 
     panel_close()
 
     err1, err2, err3 = st.columns(3, gap="medium")
 
     with err1:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Falsos Negativos</h3>
-                <div class="sub">Phishing no detectado (crítico).</div>
-                <div class="metric-panel-value" style="color:#ef4444;">{real_confusion['FN']}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Falsos Negativos", "Phishing no detectado (crítico).", str(real_confusion["FN"]), "#ef4444")
 
     with err2:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Falsos Positivos</h3>
-                <div class="sub">Website legítimo marcado como phishing.</div>
-                <div class="metric-panel-value" style="color:#f59e0b;">{real_confusion['FP']}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Falsos Positivos", "Website legítimo marcado como phishing.", str(real_confusion["FP"]), "#f59e0b")
 
     with err3:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Tasa de Error Total</h3>
-                <div class="sub">Porcentaje total de clasificaciones incorrectas.</div>
-                <div class="metric-panel-value" style="color:#2563eb;">{real_metrics['error_rate'] * 100:.3f}%</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Tasa de Error Total", "Porcentaje total de clasificaciones incorrectas.", f"{real_metrics['error_rate'] * 100:.3f}%", "#2563eb")
 
     panel_open("Comparación de modelos", "Ranking de modelos según ROC_AUC_CV_mean.")
     st.dataframe(model_results_df.round(4), width="stretch", hide_index=True)
@@ -1143,10 +975,8 @@ elif page == "Rendimiento del Algoritmo":
 # =========================
 # Página 3: Parámetros
 # =========================
-# =========================
-# Página 3: Parámetros
-# =========================
 else:
+    # Página de parametrización: muestra cómo quedó configurado el modelo ganador.
     hero(
         "Parametrización del Modelo",
         f"Configuración real del mejor modelo seleccionado: {best_model_name}.",
@@ -1166,40 +996,13 @@ else:
     s1, s2, s3 = st.columns(3, gap="medium")
 
     with s1:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Criterio principal</h3>
-                <div class="sub">Métrica usada para ordenar el ranking.</div>
-                <div class="metric-panel-value" style="color:#2563eb;">{DEFAULT_BEST_MODEL_CRITERION}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Criterio principal", "Métrica usada para ordenar el ranking.", DEFAULT_BEST_MODEL_CRITERION, "#2563eb")
 
     with s2:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>ROC_AUC_CV_mean</h3>
-                <div class="sub">Valor promedio del mejor modelo en validación cruzada.</div>
-                <div class="metric-panel-value" style="color:#7c3aed;">{best_model_row['ROC_AUC_CV_mean']:.4f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("ROC_AUC_CV_mean", "Valor promedio del mejor modelo en validación cruzada.", f"{best_model_row['ROC_AUC_CV_mean']:.4f}", "#7c3aed")
 
     with s3:
-        st.markdown(
-            f"""
-            <div class="panel metric-panel">
-                <h3>Accuracy_CV_mean</h3>
-                <div class="sub">Exactitud promedio del mejor modelo en validación cruzada.</div>
-                <div class="metric-panel-value" style="color:#06b6d4;">{best_model_row['Accuracy_CV_mean']:.4f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        metric_panel_card("Accuracy_CV_mean", "Exactitud promedio del mejor modelo en validación cruzada.", f"{best_model_row['Accuracy_CV_mean']:.4f}", "#06b6d4")
     panel_close()
 
     panel_open("Hiperparámetros reales del modelo ganador", "Parámetros obtenidos directamente desde get_params().")

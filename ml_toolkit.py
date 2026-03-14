@@ -3,7 +3,7 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from sklearn.base import clone
+from sklearn.base import BaseEstimator, clone
 from sklearn.model_selection import train_test_split, StratifiedKFold, KFold, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
@@ -24,6 +24,18 @@ from sklearn.cluster import KMeans
 # 0) MÉTRICAS (OCP): agregas sin tocar runners
 # =============================================================================
 MetricFn = Callable[[np.ndarray, np.ndarray], Dict[str, object]]
+
+
+def get_positive_score(model, X):
+    """Obtiene un score continuo de la clase positiva si el modelo lo soporta."""
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if proba.ndim == 2 and proba.shape[1] >= 2:
+            return proba[:, 1]
+        return np.ravel(proba)
+    if hasattr(model, "decision_function"):
+        return model.decision_function(X)
+    return None
 
 def m_accuracy_error() -> Callable:
     def _m(y, yp, model=None, X=None):
@@ -46,10 +58,9 @@ def m_clf_basic(pos_label=1) -> Callable:
 
         auc = None
         try:
-            if hasattr(model, "predict_proba"):
-                auc = float(roc_auc_score(y, model.predict_proba(X)[:, 1]))
-            elif hasattr(model, "decision_function"):
-                auc = float(roc_auc_score(y, model.decision_function(X)))
+            score = get_positive_score(model, X)
+            if score is not None:
+                auc = float(roc_auc_score(y, score))
         except Exception:
             auc = None
 
@@ -132,12 +143,12 @@ class DataPreparer:
         y_transform: Optional[Callable[[pd.Series], np.ndarray]] = None,
         stratify: bool = False,
     ):
-        features = features or []
-        X = df.drop(columns=[target]) if not features else df[features]
-        cols = list(X.columns)
-
-        y_series = df[target]
-        y = y_transform(y_series) if y_transform else y_series.values
+        X, y, cols = self.build_xy(
+            df=df,
+            target=target,
+            features=features,
+            y_transform=y_transform,
+        )
 
         X_train, X_test, y_train, y_test = train_test_split(
             X,
@@ -148,8 +159,7 @@ class DataPreparer:
         )
 
         if self.scaler is not None:
-            X_train = pd.DataFrame(self.scaler.fit_transform(X_train), columns=cols, index=X_train.index)
-            X_test = pd.DataFrame(self.scaler.transform(X_test), columns=cols, index=X_test.index)
+            X_train, X_test = self.scale_train_test(X_train, X_test, cols=cols)
 
         return X_train, X_test, y_train, y_test, cols
 
@@ -207,10 +217,79 @@ class DataPreparer:
         y_train, y_test = y[:cut], y[cut:]
 
         if self.scaler is not None:
-            X_train = pd.DataFrame(self.scaler.fit_transform(X_train), columns=X.columns, index=X_train.index)
-            X_test = pd.DataFrame(self.scaler.transform(X_test), columns=X.columns, index=X_test.index)
+            X_train, X_test = self.scale_train_test(X_train, X_test, cols=list(X.columns))
 
         return X_train, X_test, y_train, y_test, list(X.columns)
+
+    def split_time_series(
+        self,
+        series: pd.Series,
+        test_size: Optional[int] = None,
+    ):
+        # Split temporal directo para modelos que trabajan sobre la serie cruda.
+        series = pd.to_numeric(series, errors="coerce").dropna()
+        n = len(series)
+        if n < 2:
+            raise ValueError("Se requieren al menos 2 observaciones para split temporal.")
+
+        if test_size is None:
+            test_size = max(1, int(round(n * (1 - self.train_size))))
+        if not isinstance(test_size, int) or test_size <= 0 or test_size >= n:
+            raise ValueError("test_size debe ser entero en [1, n-1].")
+
+        cut = n - test_size
+        train_series = series.iloc[:cut].copy()
+        test_series = series.iloc[cut:].copy()
+        return train_series, test_series
+
+
+class HoltWintersForecaster(BaseEstimator):
+    """Adaptador simple para ExponentialSmoothing."""
+
+    def __init__(self, trend: str = "add", seasonal: str = "add", seasonal_periods: int = 7):
+        self.trend = trend
+        self.seasonal = seasonal
+        self.seasonal_periods = seasonal_periods
+        self.model_ = None
+
+    def fit(self, series: pd.Series):
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+        # El adaptador normaliza la entrada para que TimeSeriesRunner pueda tratarlo como un estimador más.
+        clean_series = pd.to_numeric(pd.Series(series), errors="coerce").dropna().reset_index(drop=True)
+        self.model_ = ExponentialSmoothing(
+            clean_series,
+            trend=self.trend,
+            seasonal=self.seasonal,
+            seasonal_periods=self.seasonal_periods,
+        ).fit()
+        return self
+
+    def predict(self, steps: int) -> np.ndarray:
+        if self.model_ is None:
+            raise ValueError("El modelo Holt-Winters aún no fue entrenado.")
+        return np.asarray(self.model_.forecast(steps))
+
+
+class ARIMAForecaster(BaseEstimator):
+    """Adaptador simple para ARIMA."""
+
+    def __init__(self, order=(1, 1, 1)):
+        self.order = order
+        self.model_ = None
+
+    def fit(self, series: pd.Series):
+        from statsmodels.tsa.arima.model import ARIMA
+
+        # Mantiene una interfaz fit/predict mínima y compatible con clone().
+        clean_series = pd.to_numeric(pd.Series(series), errors="coerce").dropna().reset_index(drop=True)
+        self.model_ = ARIMA(clean_series, order=self.order).fit()
+        return self
+
+    def predict(self, steps: int) -> np.ndarray:
+        if self.model_ is None:
+            raise ValueError("El modelo ARIMA aún no fue entrenado.")
+        return np.asarray(self.model_.forecast(steps=steps))
 
 
 # =============================================================================
@@ -257,17 +336,16 @@ class SupervisedRunner:
         self._prepared = False
 
         if self.task == "classification" and self.class_weight is not None:
-            self._set_class_weight_if_supported(self.model, self.class_weight)
+            self._set_class_weight_if_supported(self.class_weight)
 
-    @staticmethod
-    def _set_class_weight_if_supported(model, class_weight: object = None):
+    def _set_class_weight_if_supported(self, class_weight: object = None):
         if class_weight is None:
-            return model
+            return self.model
 
         try:
-            params = model.get_params(deep=True)
+            params = self.model.get_params(deep=True)
         except Exception:
-            return model
+            return self.model
 
         keys = []
         if "class_weight" in params:
@@ -275,10 +353,10 @@ class SupervisedRunner:
         keys.extend([k for k in params.keys() if k.endswith("__class_weight")])
 
         if not keys:
-            return model
+            return self.model
 
-        model.set_params(**{k: class_weight for k in keys})
-        return model
+        self.model.set_params(**{k: class_weight for k in keys})
+        return self.model
 
     def _y_transform(self, y: pd.Series) -> np.ndarray:
         if self.task == "classification":
@@ -389,22 +467,44 @@ class TimeSeriesRunner:
         self._fitted_full = False
         self._last_observed: Optional[pd.Series] = None
         self.feature_names: List[str] = []
+        self.test_index = None
+
+    def _uses_series_forecaster(self) -> bool:
+        # Estos modelos no usan lags tabulares sino la serie directamente.
+        return isinstance(self.model, (HoltWintersForecaster, ARIMAForecaster))
 
     def _prepare(self):
-        X, y, cols = self.preparer.build_lagged_xy(
-            df=self.df,
-            target=self.target,
-            lags=self.lags,
-            features=self.features,
-        )
-        self.X_train, self.X_test, self.y_train, self.y_test, self.feature_names = self.preparer.split_time_xy(
-            X, y, test_size=self.test_size
-        )
+        if self._uses_series_forecaster():
+            # Rama para modelos statsmodels adaptados: separa train/test sobre la serie cruda.
+            series = pd.to_numeric(self.df[self.target], errors="coerce").dropna()
+            self.train_series, self.test_series = self.preparer.split_time_series(series, test_size=self.test_size)
+            self.y_train = self.train_series.values
+            self.y_test = self.test_series.values
+            self.feature_names = [self.target]
+            self.test_index = self.test_series.index
+            self.X_train = None
+            self.X_test = None
+        else:
+            # Rama autoregresiva/tabular: construye lags y luego hace split temporal.
+            X, y, cols = self.preparer.build_lagged_xy(
+                df=self.df,
+                target=self.target,
+                lags=self.lags,
+                features=self.features,
+            )
+            self.X_train, self.X_test, self.y_train, self.y_test, self.feature_names = self.preparer.split_time_xy(
+                X, y, test_size=self.test_size
+            )
+            self.test_index = self.X_test.index
         self._prepared = True
 
     def fit_predict(self) -> np.ndarray:
         if not self._prepared:
             self._prepare()
+        if self._uses_series_forecaster():
+            # En modelos de serie directa, predict recibe la cantidad de pasos del holdout.
+            self.model.fit(self.train_series)
+            return self.model.predict(len(self.test_series))
         self.model.fit(self.X_train, self.y_train)
         return self.model.predict(self.X_test)
 
@@ -421,6 +521,33 @@ class TimeSeriesRunner:
         test_size: Optional[int] = None,
         gap: int = 0,
     ) -> Dict[str, object]:
+        if self._uses_series_forecaster():
+            # Backtesting temporal para ARIMA/Holt-Winters sin convertir la serie a lags.
+            series = pd.to_numeric(self.df[self.target], errors="coerce").dropna().reset_index(drop=True)
+            cv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size, gap=gap)
+
+            fold_metrics: List[Dict[str, object]] = []
+            for tr, te in cv.split(series):
+                train_series = series.iloc[tr].copy()
+                test_series = series.iloc[te].copy()
+
+                model_fold = clone(self.model)
+                model_fold.fit(train_series)
+                yp = model_fold.predict(len(test_series))
+
+                out: Dict[str, object] = {}
+                for fn in self.metrics:
+                    out.update(fn(test_series.values, yp, model=model_fold, X=None))
+                fold_metrics.append(out)
+
+            df_res = pd.DataFrame(fold_metrics)
+            final: Dict[str, object] = {}
+            for col in df_res.columns:
+                if pd.api.types.is_numeric_dtype(df_res[col]):
+                    final[col] = float(df_res[col].mean())
+                    final[col + "_std"] = float(df_res[col].std())
+            return final
+
         X, y, cols = self.preparer.build_lagged_xy(
             df=self.df,
             target=self.target,
@@ -455,6 +582,14 @@ class TimeSeriesRunner:
 
     def fit_full(self):
         """Entrena con toda la serie laggeada (útil para forecast futuro)."""
+        if self._uses_series_forecaster():
+            # Para modelos de serie directa se ajusta una vez sobre toda la serie disponible.
+            series = pd.to_numeric(self.df[self.target], errors="coerce").dropna().reset_index(drop=True)
+            self.model.fit(series)
+            self._last_observed = series
+            self._fitted_full = True
+            return self
+
         X, y, cols = self.preparer.build_lagged_xy(
             df=self.df,
             target=self.target,
@@ -472,6 +607,13 @@ class TimeSeriesRunner:
 
     def forecast(self, steps: int = 1) -> np.ndarray:
         """Forecast recursivo univariado (solo lags del target)."""
+        if self._uses_series_forecaster():
+            if not self._fitted_full:
+                self.fit_full()
+            if not isinstance(steps, int) or steps <= 0:
+                raise ValueError("steps debe ser entero positivo.")
+            return self.model.predict(steps)
+
         if self.features:
             raise ValueError("forecast recursivo solo soporta target univariado (features vacías).")
         if not self._fitted_full:
@@ -485,6 +627,7 @@ class TimeSeriesRunner:
         preds: List[float] = []
 
         for _ in range(steps):
+            # Cada predicción nueva se reutiliza como entrada para el siguiente paso.
             lags_row = [history[-i] for i in range(1, self.lags + 1)]
             X_next = pd.DataFrame([lags_row], columns=[f"{self.target}_lag_{i}" for i in range(1, self.lags + 1)])
 
@@ -560,7 +703,7 @@ class UnsupervisedRunner:
         if hasattr(self.model, "inertia_"):
             self.metrics["inercia"] = float(self.model.inertia_)
 
-    # --- helpers numéricos (sin plots) ---
+    # --- operaciones numéricas para preparar visualización externa ---
     def ensure_2d_embedding(self):
         """Si no hay embedding_ (o no es 2D), crea una proyección PCA(2) para visualizar afuera."""
         if self.embedding_ is None or (isinstance(self.embedding_, np.ndarray) and self.embedding_.shape[1] != 2):
@@ -589,6 +732,12 @@ class EDAExplorer:
             modo_csv = num
         self._df = self._cargar_csv(path, modo_csv)
 
+    @classmethod
+    def from_df(cls, df: pd.DataFrame):
+        instance = cls.__new__(cls)
+        instance._df = df.copy()
+        return instance
+
     @property
     def df(self) -> pd.DataFrame:
         return self._df
@@ -599,7 +748,13 @@ class EDAExplorer:
 
     def _cargar_csv(self, path: str, modo_csv: int) -> pd.DataFrame:
         if modo_csv == 1:
-            return pd.read_csv(path, sep=",", decimal=".", index_col=0)
+            # Lee primero sin asumir índice. Solo promueve la primera columna a índice
+            # cuando el CSV parece venir exportado con el índice de pandas.
+            df = pd.read_csv(path, sep=",", decimal=".")
+            first_col = str(df.columns[0]).strip() if len(df.columns) else ""
+            if first_col.lower().startswith("unnamed:"):
+                df = df.set_index(df.columns[0])
+            return df
         if modo_csv == 2:
             return pd.read_csv(path, sep=";", decimal=".")
         raise ValueError("modo_csv debe ser 1 (sep=',', index_col=0) o 2 (sep=';').")
@@ -611,6 +766,28 @@ class EDAExplorer:
 
     def solo_numericas(self):
         self._df = self._df.select_dtypes(include=["number"])
+        return self
+
+    def normalizar_columnas(self):
+        self._df = self._df.copy()
+        self._df.columns = self._df.columns.str.replace('"', '', regex=False).str.strip()
+        return self
+
+    def convertir_datetime(self, columnas):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        for col in columnas:
+            if col not in self._df.columns:
+                raise ValueError(f"'{col}' no existe en el DataFrame.")
+            self._df[col] = pd.to_datetime(self._df[col], errors="coerce")
+        return self
+
+    def convertir_numerico(self, columnas):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        for col in columnas:
+            if col not in self._df.columns:
+                raise ValueError(f"'{col}' no existe en el DataFrame.")
+            self._df[col] = pd.to_numeric(self._df[col], errors="coerce")
+        return self
 
     def a_dummies(self, drop_first: bool = True):
         cols_cat = self._df.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -619,6 +796,7 @@ class EDAExplorer:
             for c in self._df.columns:
                 if self._df[c].dtype == bool:
                     self._df[c] = self._df[c].astype(int)
+        return self
 
     def eliminar_columnas(self, columnas):
         idx_name = self._df.index.name
@@ -627,9 +805,11 @@ class EDAExplorer:
             self._df.reset_index(drop=True, inplace=True)
             columnas = [c for c in columnas if c != idx_name]
         self._df.drop(columns=columnas, inplace=True, errors="ignore")
+        return self
 
     def renombrar_columnas(self, mapping):
         self._df.rename(columns=mapping, inplace=True)
+        return self
 
     def valores_unicos(self, col: str):
         vc = self._df[col].value_counts(dropna=False)
@@ -639,11 +819,25 @@ class EDAExplorer:
         """Retorna conteo de nulos por columna."""
         return self._df.isna().sum()
 
-    def eliminarDuplicados(self):
-        self._df.drop_duplicates(inplace=True)
+    def eliminarDuplicados(self, columnas=None):
+        subset = None if columnas is None else ([columnas] if isinstance(columnas, str) else list(columnas))
+        self._df = self._df.drop_duplicates(subset=subset)
+        return self
 
     def eliminarNulos(self):
-        self._df.dropna(inplace=True)
+        self._df = self._df.dropna()
+        return self
+
+    def eliminar_nulos_en(self, columnas):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        self._df = self._df.dropna(subset=columnas)
+        return self
+
+    def ordenar_por(self, columna: str, ascending: bool = True):
+        if columna not in self._df.columns:
+            raise ValueError(f"'{columna}' no existe en el DataFrame.")
+        self._df = self._df.sort_values(columna, ascending=ascending).reset_index(drop=True)
+        return self
 
     def resumen_estadistico(self) -> pd.DataFrame:
         """Retorna describe() para numéricas."""
@@ -652,11 +846,51 @@ class EDAExplorer:
     # --- features ---
     def ingenieria_tiempo(self, columna_tiempo: str):
         if columna_tiempo not in self._df.columns:
-            return
-        self._df[columna_tiempo] = pd.to_datetime(self._df[columna_tiempo], errors="coerce")
+            return self
+        self.convertir_datetime(columna_tiempo)
         self._df[f"{columna_tiempo}_Hour"] = self._df[columna_tiempo].dt.hour
         self._df[f"{columna_tiempo}_DayOfWeek"] = self._df[columna_tiempo].dt.dayofweek
-        self.eliminar_columnas([columna_tiempo])
+        return self.eliminar_columnas([columna_tiempo])
+
+    def preparar_serie_temporal(
+        self,
+        date_col: str,
+        target_col: str,
+        drop_duplicates: bool = False,
+    ):
+        """Normaliza un DataFrame para forecasting.
+
+        - Limpia nombres de columnas.
+        - Convierte la columna de fecha a datetime.
+        - Convierte el target a numérico.
+        - Elimina filas con nulos en fecha/target.
+        - Ordena cronológicamente.
+        - Opcionalmente elimina duplicados exactos.
+        """
+        self.normalizar_columnas()
+        self.convertir_datetime(date_col)
+        self.convertir_numerico(target_col)
+        self.eliminar_nulos_en([date_col, target_col])
+        if drop_duplicates:
+            self.eliminarDuplicados()
+        self.ordenar_por(date_col)
+        return self
+
+    def detectar_columnas_fecha(self, sample_size: int = 20, threshold: float = 0.7) -> List[str]:
+        candidates = []
+        for col in self._df.columns:
+            if pd.api.types.is_datetime64_any_dtype(self._df[col]):
+                candidates.append(col)
+                continue
+
+            sample = self._df[col].dropna().astype(str).head(sample_size)
+            if sample.empty:
+                continue
+
+            parsed = pd.to_datetime(sample, errors="coerce")
+            if parsed.notna().mean() >= threshold:
+                candidates.append(col)
+        return candidates
 
     # --- correlaciones (data) ---
     def correlaciones(self) -> pd.DataFrame:
@@ -687,7 +921,7 @@ class EDAExplorer:
 
 
 # =============================================================================
-# Helpers notebook
+# Funciones para comparar resultados fuera de los runners
 # =============================================================================
 def compare_unsupervised(models: List[UnsupervisedRunner], metrics: List[str]) -> pd.DataFrame:
     return pd.DataFrame(

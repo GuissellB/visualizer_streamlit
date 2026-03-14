@@ -1,43 +1,381 @@
-import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-from sklearn.decomposition import PCA
+import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.metrics import roc_auc_score, roc_curve
-from scipy.cluster.hierarchy import linkage, dendrogram
 
 
 class Visualizer:
-    """Solo visualización + tablas para notebooks/Streamlit.
+    """Crea figuras Plotly reutilizables para las apps de Streamlit."""
 
-    - NO entrena modelos
-    - NO hace splits
-    - NO modifica dataframes originales
-    - Retorna figuras (matplotlib) y DataFrames listos para mostrar
-    """
+    def _base_layout(
+        self,
+        fig: go.Figure,
+        *,
+        height: int,
+        margin: Optional[Dict[str, int]] = None,
+        paper_bgcolor: str = "rgba(0,0,0,0)",
+        plot_bgcolor: str = "rgba(248,250,252,0.92)",
+        font_color: str = "#1e293b",
+        showlegend: Optional[bool] = None,
+    ) -> go.Figure:
+        fig.update_layout(
+            height=height,
+            margin=margin or dict(l=10, r=10, t=10, b=10),
+            paper_bgcolor=paper_bgcolor,
+            plot_bgcolor=plot_bgcolor,
+            font=dict(color=font_color),
+        )
+        if showlegend is not None:
+            fig.update_layout(showlegend=showlegend)
+        return fig
 
-    # ---------------------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def _grid(n_plots: int, n_cols: int = 3, w: float = 5, h: float = 4, dpi: int = 150):
-        n_rows = int(math.ceil(n_plots / n_cols))
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(w * n_cols, h * n_rows), dpi=dpi)
-        return fig, np.array(axes).flatten()
+    def horizontal_bar(
+        self,
+        df: pd.DataFrame,
+        *,
+        x: str,
+        y: str,
+        color: Optional[str] = None,
+        text: Optional[Sequence[str]] = None,
+        color_scale: Optional[Sequence[str]] = None,
+        height: int = 390,
+        margin: Optional[Dict[str, int]] = None,
+        x_title: str = "",
+        y_title: str = "",
+        x_range: Optional[Sequence[float]] = None,
+        show_color_scale: bool = False,
+        x_gridcolor: str = "rgba(148,163,184,0.18)",
+    ) -> go.Figure:
+        fig = px.bar(
+            df,
+            x=x,
+            y=y,
+            orientation="h",
+            text=text,
+            color=color,
+            color_continuous_scale=color_scale,
+        )
+        fig.update_traces(
+            textposition="inside",
+            marker_line_width=0,
+            cliponaxis=False,
+            insidetextanchor="end",
+        )
+        fig.update_xaxes(
+            title=x_title,
+            range=x_range,
+            showgrid=True,
+            gridcolor=x_gridcolor,
+            zeroline=False,
+        )
+        fig.update_yaxes(title=y_title, showgrid=False, automargin=True)
+        fig.update_layout(coloraxis_showscale=show_color_scale)
+        return self._base_layout(fig, height=height, margin=margin or dict(l=20, r=20, t=10, b=20))
 
-    @staticmethod
-    def _numeric_cols(df: pd.DataFrame) -> List[str]:
-        return df.select_dtypes(include="number").columns.tolist()
+    def donut_chart(
+        self,
+        df: pd.DataFrame,
+        *,
+        names: str,
+        values: str,
+        color: Optional[str] = None,
+        color_map: Optional[Dict[str, str]] = None,
+        hole: float = 0.68,
+        height: int = 390,
+        margin: Optional[Dict[str, int]] = None,
+    ) -> go.Figure:
+        fig = px.pie(
+            df,
+            names=names,
+            values=values,
+            hole=hole,
+            color=color,
+            color_discrete_map=color_map,
+        )
+        fig.update_traces(textinfo="percent+label", textposition="inside")
+        fig.update_layout(
+            legend=dict(orientation="h", y=-0.08, x=0.5, xanchor="center"),
+            uniformtext_minsize=12,
+            uniformtext_mode="hide",
+        )
+        return self._base_layout(fig, height=height, margin=margin or dict(l=15, r=15, t=10, b=15))
 
-    # ---------------------------------------------------------------------
-    # EDA (desde EDAExplorer)
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def sup_plot_roc( y_true: Sequence, y_score: Sequence, label: str = "Modelo", title: str = "Curva ROC", linestyle: str = "-",):
+    def target_distribution_donut(
+        self,
+        df: pd.DataFrame,
+        *,
+        target_col: str,
+        label_map: Optional[Dict[Any, str]] = None,
+        color_map: Optional[Dict[str, str]] = None,
+        hole: float = 0.68,
+        height: int = 390,
+        margin: Optional[Dict[str, int]] = None,
+    ) -> Optional[go.Figure]:
+        if target_col not in df.columns:
+            return None
+
+        pie_df = (
+            df[target_col]
+            .value_counts()
+            .rename_axis("target")
+            .reset_index(name="cantidad")
+        )
+        label_map = label_map or {1: "Legítimo", -1: "Phishing"}
+        pie_df["tipo"] = pie_df["target"].map(label_map).fillna(pie_df["target"].astype(str))
+        return self.donut_chart(
+            pie_df,
+            names="tipo",
+            values="cantidad",
+            color="tipo",
+            color_map=color_map or {"Legítimo": "#2563eb", "Phishing": "#7c3aed"},
+            hole=hole,
+            height=height,
+            margin=margin or dict(l=15, r=15, t=10, b=15),
+        )
+
+    def roc_curve_plot(
+        self,
+        roc_df: pd.DataFrame,
+        *,
+        auc_value: Optional[float] = None,
+        curve_name: str = "ROC Curve",
+        line_color: str = "#2563eb",
+        random_name: str = "Random Classifier",
+        height: int = 380,
+        margin: Optional[Dict[str, int]] = None,
+        x_title: str = "Tasa de Falsos Positivos (FPR)",
+        y_title: str = "Tasa de Verdaderos Positivos (TPR)",
+    ) -> go.Figure:
+        fig = go.Figure()
+        trace_name = curve_name if auc_value is None else f"{curve_name} (AUC = {auc_value:.4f})"
+        fig.add_trace(
+            go.Scatter(
+                x=roc_df["fpr"],
+                y=roc_df["tpr"],
+                mode="lines",
+                name=trace_name,
+                line=dict(width=4, color=line_color),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 1],
+                y=[0, 1],
+                mode="lines",
+                name=random_name,
+                line=dict(width=2, dash="dash", color="rgba(100,116,139,0.8)"),
+            )
+        )
+        fig.update_xaxes(title=x_title, gridcolor="rgba(148,163,184,0.18)")
+        fig.update_yaxes(title=y_title, gridcolor="rgba(148,163,184,0.18)")
+        return self._base_layout(fig, height=height, margin=margin or dict(l=10, r=10, t=10, b=10))
+
+    def precision_recall_plot(
+        self,
+        pr_df: pd.DataFrame,
+        *,
+        curve_name: str = "PR Curve",
+        line_color: str = "#10b981",
+        fillcolor: str = "rgba(16,185,129,0.12)",
+        height: int = 380,
+        margin: Optional[Dict[str, int]] = None,
+        x_title: str = "Recall",
+        y_title: str = "Precision",
+    ) -> go.Figure:
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=pr_df["recall"],
+                y=pr_df["precision"],
+                mode="lines",
+                name=curve_name,
+                line=dict(width=4, color=line_color),
+                fill="tozeroy",
+                fillcolor=fillcolor,
+            )
+        )
+        fig.update_xaxes(title=x_title, gridcolor="rgba(148,163,184,0.18)")
+        fig.update_yaxes(title=y_title, gridcolor="rgba(148,163,184,0.18)")
+        return self._base_layout(fig, height=height, margin=margin or dict(l=10, r=10, t=10, b=10))
+
+    def line_chart(
+        self,
+        df: pd.DataFrame,
+        *,
+        x: str,
+        y: str,
+        height: int = 360,
+        margin: Optional[Dict[str, int]] = None,
+    ) -> go.Figure:
+        fig = px.line(df, x=x, y=y)
+        return self._base_layout(fig, height=height, margin=margin or dict(l=10, r=10, t=20, b=10))
+
+    def grouped_bar_chart(
+        self,
+        df: pd.DataFrame,
+        *,
+        x: str,
+        y: str,
+        color: str,
+        barmode: str = "group",
+        height: int = 380,
+        margin: Optional[Dict[str, int]] = None,
+        showlegend: Optional[bool] = None,
+    ) -> go.Figure:
+        fig = px.bar(df, x=x, y=y, color=color, barmode=barmode)
+        return self._base_layout(
+            fig,
+            height=height,
+            margin=margin or dict(l=10, r=10, t=20, b=10),
+            showlegend=showlegend,
+        )
+
+    def multi_line_chart(
+        self,
+        series: Sequence[Dict[str, Any]],
+        *,
+        height: int = 380,
+        margin: Optional[Dict[str, int]] = None,
+    ) -> go.Figure:
+        fig = go.Figure()
+        for item in series:
+            fig.add_trace(
+                go.Scatter(
+                    x=item["x"],
+                    y=item["y"],
+                    mode=item.get("mode", "lines"),
+                    name=item["name"],
+                    line=item.get("line"),
+                )
+            )
+        return self._base_layout(fig, height=height, margin=margin or dict(l=10, r=10, t=20, b=10))
+
+    def correlation_heatmap(
+        self,
+        df: pd.DataFrame,
+        *,
+        height: int = 720,
+    ) -> Optional[go.Figure]:
+        corr = df.corr(numeric_only=True)
+        if corr.empty:
+            return None
+
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=corr.values,
+                x=corr.columns,
+                y=corr.index,
+                zmin=-1,
+                zmax=1,
+                colorscale="RdBu",
+                reversescale=True,
+                text=np.round(corr.values, 2),
+                texttemplate="%{text}",
+                hovertemplate="X: %{x}<br>Y: %{y}<br>Correlación: %{z:.2f}<extra></extra>",
+            )
+        )
+        fig.update_xaxes(side="bottom")
+        fig.update_yaxes(autorange="reversed")
+        return self._base_layout(
+            fig,
+            height=height,
+            margin=dict(l=10, r=10, t=40, b=10),
+            plot_bgcolor="white",
+        )
+
+    def eda_histogramaClase(self, df: pd.DataFrame, target_col: str) -> Optional[go.Figure]:
+        if target_col not in df.columns:
+            return None
+
+        counts = df[target_col].value_counts().sort_index().reset_index()
+        counts.columns = [target_col, "Frecuencia"]
+        fig = px.bar(counts, x=target_col, y="Frecuencia", color=target_col, text="Frecuencia")
+        fig.update_traces(marker_line_width=0)
+        fig.update_xaxes(title=target_col)
+        fig.update_yaxes(title="Frecuencia", gridcolor="rgba(148,163,184,0.18)")
+        return self._base_layout(fig, height=360, margin=dict(l=10, r=10, t=20, b=10), showlegend=False)
+
+    def eda_graficoCorrelacionTarget(self, df: pd.DataFrame, target_col: str) -> Optional[go.Figure]:
+        if target_col not in df.columns:
+            return None
+
+        corr = (
+            df.corr(numeric_only=True)[target_col]
+            .drop(target_col)
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+        corr.columns = ["feature", "correlation"]
+        sorted_corr = corr.sort_values("correlation")
+        return self.horizontal_bar(
+            sorted_corr,
+            x="correlation",
+            y="feature",
+            color="correlation",
+            text=sorted_corr["correlation"].map(lambda value: f"{value:.2f}"),
+            color_scale=["#60a5fa", "#7c3aed"],
+            height=max(360, len(corr) * 28),
+            x_title="Correlation Coefficient",
+            y_title="Predictor Variable",
+            x_range=[
+                float(corr["correlation"].min()) * 1.1 if len(corr) else -1,
+                float(corr["correlation"].max()) * 1.1 if len(corr) else 1,
+            ],
+        )
+
+    def top_target_correlation_bar(
+        self,
+        df: pd.DataFrame,
+        *,
+        target_col: str,
+        top_n: int = 10,
+        absolute: bool = True,
+        height: int = 390,
+        margin: Optional[Dict[str, int]] = None,
+        x_title: str = "Correlación absoluta",
+        y_title: str = "",
+        color_scale: Optional[Sequence[str]] = None,
+    ) -> Optional[go.Figure]:
+        if target_col not in df.columns:
+            return None
+
+        corr = (
+            df.corr(numeric_only=True)[target_col]
+            .drop(target_col, errors="ignore")
+        )
+        if absolute:
+            corr = corr.abs()
+
+        corr_df = (
+            corr.sort_values(ascending=False)
+            .head(top_n)
+            .reset_index()
+        )
+        corr_df.columns = ["feature", "importance"]
+        sorted_corr_df = corr_df.sort_values("importance")
+        max_value = float(corr_df["importance"].max()) if len(corr_df) else 1.0
+
+        return self.horizontal_bar(
+            sorted_corr_df,
+            x="importance",
+            y="feature",
+            color="importance",
+            text=sorted_corr_df["importance"].map(lambda value: f"{value:.2f}"),
+            color_scale=color_scale or ["#60a5fa", "#7c3aed"],
+            height=height,
+            margin=margin or dict(l=20, r=20, t=10, b=20),
+            x_title=x_title,
+            y_title=y_title,
+            x_range=[0, max_value * 1.05],
+        )
+
+    def eda_graficoCorrelacion(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        return self.correlation_heatmap(df)
+
+    def sup_plot_roc(self, y_true: Sequence, y_score: Sequence, label: str = "Modelo", title: str = "Curva ROC") -> Optional[go.Figure]:
         y_true = np.asarray(y_true)
         y_score = np.asarray(y_score)
         if y_true.shape[0] != y_score.shape[0] or y_true.shape[0] == 0:
@@ -45,26 +383,25 @@ class Visualizer:
 
         fpr, tpr, _ = roc_curve(y_true, y_score)
         auc_score = roc_auc_score(y_true, y_score)
-
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
-        ax.plot(fpr, tpr, linestyle=linestyle, label=f"{label} (AUC = {auc_score:.4f})")
-        ax.plot([0, 1], [0, 1], "g--", label="Azar")
-        ax.set_xlim(0.0, 1.0)
-        ax.set_ylim(0.0, 1.05)
-        ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
-        ax.set_title(title)
-        ax.grid(True, linestyle="--", alpha=0.4)
-        ax.legend(loc="lower right")
-        fig.tight_layout()
+        fig = self.roc_curve_plot(
+            pd.DataFrame({"fpr": fpr, "tpr": tpr}),
+            auc_value=auc_score,
+            curve_name=label,
+            x_title="False Positive Rate",
+            y_title="True Positive Rate",
+        )
+        fig.update_layout(title=title)
         return fig
 
-    @staticmethod
-    def sup_plot_roc_compare(curves: Dict[str, Tuple[Sequence, Sequence]],title: str = "Comparación Curva ROC",):
+    def sup_plot_roc_compare(
+        self,
+        curves: Dict[str, Tuple[Sequence, Sequence]],
+        title: str = "Comparación Curva ROC",
+    ) -> Optional[go.Figure]:
         if not curves:
             return None
 
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
+        fig = go.Figure()
         plotted = 0
         for name, pair in curves.items():
             if pair is None or len(pair) != 2:
@@ -77,398 +414,58 @@ class Visualizer:
 
             fpr, tpr, _ = roc_curve(y_true, y_score)
             auc_score = roc_auc_score(y_true, y_score)
-            ax.plot(fpr, tpr, label=f"{name} (AUC = {auc_score:.4f})")
+            fig.add_trace(
+                go.Scatter(
+                    x=fpr,
+                    y=tpr,
+                    mode="lines",
+                    name=f"{name} (AUC = {auc_score:.4f})",
+                    line=dict(width=3),
+                )
+            )
             plotted += 1
 
         if plotted == 0:
-            plt.close(fig)
             return None
 
-        ax.plot([0, 1], [0, 1], "g--", label="Azar")
-        ax.set_xlim(0.0, 1.0)
-        ax.set_ylim(0.0, 1.05)
-        ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
-        ax.set_title(title)
-        ax.grid(True, linestyle="--", alpha=0.4)
-        ax.legend(loc="lower right")
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_boxplots(df: pd.DataFrame):
-        cols = Visualizer._numeric_cols(df)
-        if not cols:
-            return None
-
-        fig, axes = Visualizer._grid(len(cols))
-        colores = sns.color_palette("Set3", len(cols))
-        for i, col in enumerate(cols):
-            sns.boxplot(y=df[col], ax=axes[i], color=colores[i])
-            axes[i].set_title(f"Boxplot: {col}", fontsize=10)
-            axes[i].grid(True, linestyle="--", alpha=0.5)
-
-        for j in range(i + 1, len(axes)):
-            fig.delaxes(axes[j])
-
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_histogramas(df: pd.DataFrame):
-        cols = Visualizer._numeric_cols(df)
-        if not cols:
-            return None
-
-        fig, axes = Visualizer._grid(len(cols))
-        colores = sns.color_palette("Set2", len(cols))
-        for i, col in enumerate(cols):
-            axes[i].hist(df[col].dropna(), bins=30, edgecolor="black", alpha=0.7, color=colores[i])
-            axes[i].set_title(f"Hist: {col}", fontsize=10)
-            axes[i].grid(True, linestyle="--", alpha=0.5)
-
-        for j in range(i + 1, len(axes)):
-            fig.delaxes(axes[j])
-
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_distribuciones(df: pd.DataFrame):
-        cols = Visualizer._numeric_cols(df)
-        if not cols:
-            return None
-
-        fig, axes = Visualizer._grid(len(cols))
-        colores = sns.color_palette("coolwarm", len(cols))
-        for i, col in enumerate(cols):
-            sns.histplot(df[col].dropna(), kde=True, ax=axes[i], bins=30, color=colores[i])
-            axes[i].set_title(f"Dist: {col}", fontsize=10)
-            axes[i].grid(True, linestyle="--", alpha=0.5)
-
-        for j in range(i + 1, len(axes)):
-            fig.delaxes(axes[j])
-
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_histogramaClase(df: pd.DataFrame, target_col: str):
-        if target_col not in df.columns:
-            return None
-
-        fig, ax = plt.subplots(figsize=(8, 5), dpi=150)
-        colores = sns.color_palette("pastel")
-        df[target_col].value_counts().plot(kind="bar", color=colores, ax=ax)
-        ax.set_title(f"Distribución de la Clase: {target_col}")
-        ax.set_xlabel(target_col)
-        ax.set_ylabel("Frecuencia")
-        ax.grid(axis="y", linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_densidades(df: pd.DataFrame):
-        cols = Visualizer._numeric_cols(df)
-        if not cols:
-            return None
-
-        fig, axes = Visualizer._grid(len(cols))
-        colores = sns.color_palette("husl", len(cols))
-        for i, col in enumerate(cols):
-            sns.kdeplot(data=df, x=col, fill=True, ax=axes[i], linewidth=2, color=colores[i])
-            axes[i].set_title(f"Densidad: {col}", fontsize=10)
-            axes[i].grid(True, linestyle="--", alpha=0.5)
-
-        for j in range(i + 1, len(axes)):
-            fig.delaxes(axes[j])
-
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_graficoCorrelacion(df: pd.DataFrame, figsize: Tuple[int, int] = (20, 20)):
-        corr = df.corr(numeric_only=True)
-        fig, ax = plt.subplots(figsize=figsize, dpi=150)
-        cmap = sns.diverging_palette(240, 10, as_cmap=True).reversed()
-        sns.heatmap(
-            corr,
-            vmin=-1,
-            vmax=1,
-            cmap=cmap,
-            annot=True,
-            fmt=".2f",
-            linewidths=0.5,
-            linecolor="white",
-            square=True,
-            cbar_kws={"shrink": 0.8, "label": "Correlación"},
-            annot_kws={"size": 10, "color": "black"},
-            ax=ax,
-        )
-        ax.set_title("Mapa de Calor de Correlaciones", fontsize=16)
-        ax.tick_params(axis="x", rotation=45)
-        ax.tick_params(axis="y", rotation=0)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_graficoCorrelacionTarget(df: pd.DataFrame, target_col: str):
-        if target_col not in df.columns:
-            return None
-
-        corr = df.corr(numeric_only=True)[target_col].drop(target_col).sort_values(ascending=False)
-        fig_h = max(4, corr.shape[0] * 0.35)
-        fig, ax = plt.subplots(figsize=(10, fig_h))
-        sns.barplot(x=corr.values, y=corr.index, palette="vlag", orient="h", ax=ax)
-
-        ax.axvline(0, color="gray", linestyle="--", linewidth=1)
-        offset = corr.abs().max() * 0.02 if len(corr) else 0.0
-        for i, v in enumerate(corr.values):
-            ax.text(
-                v + offset if v >= 0 else v - offset,
-                i,
-                f"{v:.2f}",
-                va="center",
-                ha="left" if v >= 0 else "right",
-                fontsize=9,
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 1],
+                y=[0, 1],
+                mode="lines",
+                name="Azar",
+                line=dict(width=2, dash="dash", color="rgba(100,116,139,0.8)"),
             )
-
-        ax.set_title(f"Correlation of Features with {target_col}", fontsize=14)
-        ax.set_xlabel("Correlation Coefficient", fontsize=12)
-        ax.set_ylabel("Predictor Variable", fontsize=12)
-        sns.despine(left=False, bottom=False)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def eda_pairplot(df: pd.DataFrame):
-        cols = Visualizer._numeric_cols(df)
-        if len(cols) < 2:
-            return None
-        g = sns.pairplot(df[cols])
-        return g.fig
-
-    # ---------------------------------------------------------------------
-    # UnsupervisedRunner plots (mismos nombres, pero retornando fig)
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def unsup_plot_clusters(runner, title: Optional[str] = None, use_pca: bool = True):
-        if runner.labels_ is None:
-            return None
-        coords = PCA(n_components=2, random_state=42).fit_transform(runner.X) if use_pca else runner.embedding_
-        if coords is None:
-            return None
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.scatter(coords[:, 0], coords[:, 1], c=runner.labels_, s=20, alpha=0.7)
-        ax.set_title(title or f"Clusters - {runner.name}")
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_graficar_2d(runner, color=None, titulo: Optional[str] = None):
-        if runner.embedding_ is None:
-            runner.embedding_ = PCA(n_components=2, random_state=0).fit_transform(runner.X)
-
-        c = runner.labels_ if (color is None and runner.labels_ is not None) else color
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.scatter(runner.embedding_[:, 0], runner.embedding_[:, 1], c=c, s=15, alpha=0.7)
-        ax.set_title(titulo or runner.name)
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_scree(runner):
-        if runner.kind != "pca" or not hasattr(runner.model, "explained_variance_ratio_"):
-            return None
-
-        var = runner.model.explained_variance_ratio_ * 100
-        comps = np.arange(1, len(var) + 1)
-
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.bar(comps, var, alpha=0.6)
-        ax.plot(comps, var, marker="o")
-        ax.set_xlabel("Componente principal")
-        ax.set_ylabel("% Varianza explicada")
-        ax.set_title(f"Scree plot - {runner.name}")
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_correlation_circle(runner, feature_names: Optional[Sequence[str]] = None, scale: float = 1.0):
-        if runner.kind != "pca" or not hasattr(runner.model, "components_"):
-            return None
-
-        comps = runner.model.components_
-        if comps.shape[0] < 2:
-            return None
-
-        if feature_names is None:
-            feature_names = list(runner.X.columns)
-
-        pc1, pc2 = comps[0], comps[1]
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.add_artist(plt.Circle((0, 0), 1, color="lightgray", fill=False))
-
-        for x, y, lab in zip(pc1, pc2, feature_names):
-            ax.arrow(0, 0, x * scale, y * scale, head_width=0.03, head_length=0.03, alpha=0.6)
-            ax.text(x * 1.1 * scale, y * 1.1 * scale, lab, ha="center", va="center", fontsize=9)
-
-        ax.axhline(0, color="grey", lw=1)
-        ax.axvline(0, color="grey", lw=1)
-        ax.set_xlabel("PC1")
-        ax.set_ylabel("PC2")
-        ax.set_title(f"Círculo de correlación - {runner.name}")
-        ax.set_xlim(-1.1, 1.1)
-        ax.set_ylim(-1.1, 1.1)
-        ax.set_aspect("equal", "box")
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_embedding(runner, color=None, titulo: Optional[str] = None):
-        if runner.embedding_ is None:
-            return None
-        if color is None and runner.labels_ is not None:
-            color = runner.labels_
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.scatter(runner.embedding_[:, 0], runner.embedding_[:, 1], c=color, s=20, alpha=0.8)
-        ax.set_xlabel("Dim 1")
-        ax.set_ylabel("Dim 2")
-        ax.set_title(titulo if titulo is not None else f"{runner.kind.upper()} - {runner.name}")
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_cluster_scatter(runner, usar_pca: bool = True, titulo: Optional[str] = None):
-        if runner.labels_ is None:
-            return None
-
-        if usar_pca:
-            coords = PCA(n_components=2, random_state=42).fit_transform(runner.X)
-        else:
-            if runner.embedding_ is None:
-                return None
-            coords = runner.embedding_
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.scatter(coords[:, 0], coords[:, 1], c=runner.labels_, s=20, alpha=0.8)
-        ax.set_xlabel("Dim 1")
-        ax.set_ylabel("Dim 2")
-        ax.set_title(titulo if titulo else f"Clusters - {runner.name}")
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_embedding_by_clusters(runner, labels=None, titulo: Optional[str] = None):
-        if runner.embedding_ is None:
-            return None
-        if labels is None:
-            labels = runner.labels_
-        if labels is None:
-            return None
-        if titulo is None:
-            titulo = f"{runner.kind.upper()} - coloreado por clusters"
-        return Visualizer.unsup_plot_embedding(runner, color=labels, titulo=titulo)
-
-    @staticmethod
-    def unsup_plot_embedding_by_variable(runner, serie, titulo: Optional[str] = None):
-        if runner.embedding_ is None:
-            return None
-        if isinstance(serie, pd.DataFrame):
-            serie = serie.iloc[:, 0]
-        if len(serie) != runner.embedding_.shape[0]:
-            return None
-        if titulo is None:
-            titulo = f"{runner.kind.upper()} - coloreado por variable"
-        return Visualizer.unsup_plot_embedding(runner, color=serie, titulo=titulo)
-
-    @staticmethod
-    def unsup_plot_centroids(runner, feature_names: Optional[Sequence[str]] = None, scale: bool = False):
-        if runner.kind != "kmeans" or not hasattr(runner.model, "cluster_centers_"):
-            return None
-
-        centers = runner.model.cluster_centers_.copy()
-        n_clusters, n_features = centers.shape
-
-        if scale:
-            max_abs = np.max(np.abs(centers), axis=0)
-            max_abs[max_abs == 0] = 1
-            centers = centers / max_abs
-
-        if feature_names is None:
-            feature_names = list(runner.X.columns)
-
-        fig, axes = plt.subplots(1, n_clusters, figsize=(4 * n_clusters, 4), sharey=True)
-        if n_clusters == 1:
-            axes = [axes]
-
-        for k, ax in enumerate(axes):
-            ax.barh(np.arange(n_features), centers[k])
-            ax.set_yticks(np.arange(n_features))
-            ax.set_yticklabels(feature_names)
-            ax.set_title(f"Cluster {k}")
-            ax.grid(axis="x", alpha=0.3)
-
-        fig.tight_layout()
-        return fig
-
-    @staticmethod
-    def unsup_plot_dendrogram(runner, method: str = "ward", p: int = 30):
-        Z = linkage(runner.X, method=method, metric="euclidean")
-        fig, ax = plt.subplots(figsize=(10, 5))
-        dendrogram(
-            Z,
-            truncate_mode="lastp",
-            p=p,
-            show_leaf_counts=True,
-            leaf_rotation=45,
-            leaf_font_size=10,
-            ax=ax,
         )
-        ax.set_title(f"Dendrograma ({method}) - {runner.name} | lastp={p}")
-        ax.set_xlabel("Clusters (truncado)")
-        ax.set_ylabel("Distancia")
-        fig.tight_layout()
-        return fig
+        fig.update_layout(title=title)
+        fig.update_xaxes(title="False Positive Rate", gridcolor="rgba(148,163,184,0.18)")
+        fig.update_yaxes(title="True Positive Rate", gridcolor="rgba(148,163,184,0.18)")
+        return self._base_layout(fig, height=420, margin=dict(l=10, r=10, t=40, b=10))
 
-    # ---------------------------------------------------------------------
-    # Tablas de resultados (para reemplazar prints del notebook)
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def results_to_df(resultados: Union[List[Dict[str, Any]], Dict[str, Any]], sort_by: Optional[str] = None, ascending: bool = False) -> pd.DataFrame:
-        """Convierte resultados a DataFrame.
-
-        - Si recibes una lista de dicts (como tu notebook), te arma la tabla completa.
-        - Si recibes un dict (un solo modelo), te arma una tabla 2 columnas: Métrica / Valor.
-        """
+    def results_to_df(
+        self,
+        resultados: Union[List[Dict[str, Any]], Dict[str, Any]],
+        sort_by: Optional[str] = None,
+        ascending: bool = False,
+    ) -> pd.DataFrame:
         if isinstance(resultados, dict):
-            return Visualizer.metrics_dict_to_df(resultados)
+            return self.metrics_dict_to_df(resultados)
 
         df = pd.DataFrame(resultados)
         if sort_by and sort_by in df.columns:
             df = df.sort_values(sort_by, ascending=ascending).reset_index(drop=True)
         return df
 
-    @staticmethod
-    def metrics_dict_to_df(metrics: Dict[str, Any]) -> pd.DataFrame:
+    def metrics_dict_to_df(self, metrics: Dict[str, Any]) -> pd.DataFrame:
         rows = []
-        for k, v in metrics.items():
-            if isinstance(v, (np.ndarray, list)) and np.asarray(v).ndim == 2:
-                # matrices (ej: ConfusionMatrix) se dejan fuera para otra visualización
+        for key, value in metrics.items():
+            if isinstance(value, (np.ndarray, list)) and np.asarray(value).ndim == 2:
                 continue
-            rows.append({"Metrica": k, "Valor": v})
+            rows.append({"Metrica": key, "Valor": value})
         return pd.DataFrame(rows)
 
-    @staticmethod
-    def confusion_matrix_df(metrics: Dict[str, Any], labels: Optional[Sequence[Any]] = None) -> Optional[pd.DataFrame]:
-        cm = metrics.get("ConfusionMatrix", None)
+    def confusion_matrix_df(self, metrics: Dict[str, Any], labels: Optional[Sequence[Any]] = None) -> Optional[pd.DataFrame]:
+        cm = metrics.get("ConfusionMatrix")
         if cm is None:
             return None
         cm = np.asarray(cm)
@@ -477,4 +474,4 @@ class Visualizer:
 
         if labels is None:
             labels = list(range(cm.shape[0]))
-        return pd.DataFrame(cm, index=[f"Real_{l}" for l in labels], columns=[f"Pred_{l}" for l in labels])
+        return pd.DataFrame(cm, index=[f"Real_{label}" for label in labels], columns=[f"Pred_{label}" for label in labels])

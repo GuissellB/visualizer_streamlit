@@ -5,7 +5,7 @@ import numpy as np
 
 # Tus imports (usa el toolkit limpio si lo estás usando)
 # Si tu archivo se llama ml_toolkit_refactored_clean.py, cambia el import a ese.
-from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner
+from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner, get_positive_score
 from visualizer import Visualizer
 
 # Modelos (igual HTML)
@@ -38,28 +38,19 @@ BEST_MODEL_CRITERIA = [
 
 
 def crear_modelo(nombre: str, random_state: int):
+    # Centraliza la construcción de modelos para reusar la misma selección en varias comparaciones.
     if nombre == "Regresión Logística":
         return LogisticRegression(random_state=random_state, solver="liblinear")
     if nombre == "Random Forest":
         return RandomForestClassifier(n_estimators=100, max_depth=8, random_state=random_state)
     if nombre == "XGBoost":
-        return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)
+        return XGBClassifier(eval_metric="logloss", random_state=random_state)
     if nombre == "LightGBM":
         return LGBMClassifier(random_state=random_state)
     if nombre == "SVM":
         return SVC(probability=True, random_state=random_state)
     raise ValueError("Modelo no reconocido")
 
-
-def _score_positivo(model, X):
-    if hasattr(model, "predict_proba"):
-        proba = model.predict_proba(X)
-        if proba.ndim == 2 and proba.shape[1] >= 2:
-            return proba[:, 1]
-        return np.ravel(proba)
-    if hasattr(model, "decision_function"):
-        return model.decision_function(X)
-    return None
 
 st.set_page_config(page_title="EDA + Modelos (HTML replica)", layout="wide")
 st.title("EDA + Resultados de Modelos")
@@ -71,6 +62,7 @@ menu = st.sidebar.radio("Menú", ["EDA", "Resultados modelos"])
 # =========================
 @st.cache_data(show_spinner=False)
 def load_and_prepare(csv_name: str) -> pd.DataFrame:
+    # Carga el dataset con EDAExplorer del toolkit y aplica la preparación base para clasificación.
     base_dir = Path(__file__).resolve().parent
     csv_path = base_dir / csv_name
     if not csv_path.exists():
@@ -81,13 +73,8 @@ def load_and_prepare(csv_name: str) -> pd.DataFrame:
     # Mapeo del target (HTML)
     eda.df[TARGET] = eda.df[TARGET].map({-1: 0, 1: 1}).astype(int)
 
-    # Limpieza (HTML)
-    eda.valores_faltantes()
-    eda.eliminarDuplicados()
-    eda.eliminarNulos()
-
-    # Dummies / conversión categóricas (HTML)
-    eda.analisisCompleto()
+    # Aplica el mismo pipeline base usado en el resto del proyecto.
+    eda.eliminarDuplicados().eliminarNulos().analisisCompleto()
 
     return eda.df
 
@@ -101,6 +88,7 @@ def load_and_prepare(csv_name: str) -> pd.DataFrame:
 def compute_model_results(
     csv_name: str, target: str, random_state: int, n_splits: int, best_model_criterion: str
 ) -> pd.DataFrame:
+    # Ejecuta la comparación principal de modelos usando SupervisedRunner del toolkit.
     df_local = load_and_prepare(csv_name)
 
     modelos = [
@@ -109,7 +97,7 @@ def compute_model_results(
         ("Random Forest",
          RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)),
         ("XGBoost",
-         XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)),
+         XGBClassifier(eval_metric="logloss", random_state=random_state)),
         ("LightGBM",
          LGBMClassifier(random_state=random_state)),
         ("SVM",
@@ -163,6 +151,7 @@ def compute_model_results(
 
 @st.cache_data(show_spinner=False)
 def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: list, n_splits: int) -> pd.DataFrame:
+    # Evalúa estabilidad por semilla reutilizando la misma preparación y runner del toolkit.
     df_local = load_and_prepare(csv_name)
 
     resultados_stab = []
@@ -210,6 +199,7 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
 def compute_best_model_balance_compare(
     csv_name: str, target: str, best_model_name: str, seed: int
 ):
+    # Compara el mejor modelo con y sin class_weight para medir el efecto del balanceo.
     df_local = load_and_prepare(csv_name)
     estandarizar = best_model_name in ["Regresión Logística", "SVM"]
 
@@ -249,7 +239,7 @@ def compute_best_model_balance_compare(
             "ROC_AUC": metricas.get("ROC_AUC_Pos"),
         })
 
-        y_score = _score_positivo(runner.model, runner.X_test)
+        y_score = get_positive_score(runner.model, runner.X_test)
         if y_score is not None:
             curvas[nombre_escenario] = (runner.y_test, y_score)
             y_true_roc = runner.y_test
@@ -257,16 +247,8 @@ def compute_best_model_balance_compare(
     return pd.DataFrame(resultados), curvas, y_true_roc
 
 
-# =========================
-# Datos + Visualizer
-# =========================
-df = load_and_prepare(CSV_NAME)
-viz = Visualizer()
-
-# =========================
-# EDA (hallazgos)
-# =========================
-if menu == "EDA":
+def render_eda_page(viz: Visualizer, df: pd.DataFrame) -> None:
+    # Página EDA: usa Visualizer para mostrar distribución, correlación y mapa de calor.
     st.header("EDA (Hallazgos)")
 
     col1, col2 = st.columns(2)
@@ -275,7 +257,7 @@ if menu == "EDA":
         st.subheader("Distribución de la clase")
         fig_class = viz.eda_histogramaClase(df, TARGET)
         if fig_class is not None:
-            st.pyplot(fig_class)
+            st.plotly_chart(fig_class, width="stretch", config={"displayModeBar": False})
         else:
             st.info(f"No pude graficar {TARGET} (no existe en df).")
 
@@ -283,17 +265,20 @@ if menu == "EDA":
         st.subheader("Correlación vs Target")
         fig_target = viz.eda_graficoCorrelacionTarget(df, TARGET)
         if fig_target is not None:
-            st.pyplot(fig_target)
+            st.plotly_chart(fig_target, width="stretch", config={"displayModeBar": False})
         else:
             st.info("No pude generar la correlación con el target.")
 
     st.subheader("Mapa de calor de correlaciones")
-    st.pyplot(viz.eda_graficoCorrelacion(df))
+    corr_fig = viz.eda_graficoCorrelacion(df)
+    if corr_fig is not None:
+        st.plotly_chart(corr_fig, width="stretch", config={"displayModeBar": False})
+    else:
+        st.info("No pude generar el mapa de calor de correlaciones.")
 
-# =========================
-# Modelos (cacheados para NO re-entrenar al cambiar de pestaña)
-# =========================
-if menu == "Resultados modelos":
+
+def render_model_results_page(viz: Visualizer) -> None:
+    # Página de resultados: combina tablas comparativas y curva ROC usando toolkit + visualizer.
     st.header("Resultados de modelos")
     criterio_mejor_modelo = st.selectbox(
         "Criterio para seleccionar mejor modelo",
@@ -301,14 +286,13 @@ if menu == "Resultados modelos":
         index=BEST_MODEL_CRITERIA.index(DEFAULT_BEST_MODEL_CRITERION),
     )
 
-    # 1) Tabla comparación (cacheada)
     with st.spinner("Cargando resultados cacheados (si es la primera vez, entrena)..."):
         resultados_df = compute_model_results(
             CSV_NAME, TARGET, RANDOM_STATE, N_SPLITS, criterio_mejor_modelo
         )
 
     st.subheader("Tabla de comparación de modelos")
-    st.dataframe(resultados_df.round(4), use_container_width=True)
+    st.dataframe(resultados_df.round(4), width="stretch")
 
     resumen_criterios = []
     for crit in BEST_MODEL_CRITERIA:
@@ -323,21 +307,20 @@ if menu == "Resultados modelos":
             )
     if resumen_criterios:
         st.markdown("### Variación del mejor modelo según criterio")
-        st.dataframe(pd.DataFrame(resumen_criterios).round(4), use_container_width=True)
+        st.dataframe(pd.DataFrame(resumen_criterios).round(4), width="stretch")
 
     mejor_nombre = resultados_df.iloc[0]["Modelo"]
     st.success(f"Mejor modelo según {criterio_mejor_modelo}: {mejor_nombre}")
 
-    # 2) Estabilidad (cacheada)
     st.subheader("Estabilidad por semilla (mejor modelo)")
     with st.spinner("Cargando estabilidad cacheada (si es la primera vez, calcula)..."):
         stab_df = compute_stability(CSV_NAME, TARGET, mejor_nombre, SEMILLAS, N_SPLITS)
 
     st.markdown("### --- ESTABILIDAD POR SEMILLA ---")
-    st.dataframe(stab_df.round(4), use_container_width=True)
+    st.dataframe(stab_df.round(4), width="stretch")
 
     st.markdown("### === RESUMEN ESTADÍSTICO ===")
-    st.dataframe(stab_df.describe().round(4), use_container_width=True)
+    st.dataframe(stab_df.describe().round(4), width="stretch")
 
     mejor_seed = int(stab_df.iloc[0]["Seed"])
     st.info(f"Mejor semilla según estabilidad: {mejor_seed}")
@@ -348,10 +331,24 @@ if menu == "Resultados modelos":
             CSV_NAME, TARGET, mejor_nombre, mejor_seed
         )
 
-    st.dataframe(balance_df.round(4), use_container_width=True)
+    st.dataframe(balance_df.round(4), width="stretch")
 
     fig_roc = viz.sup_plot_roc_compare(curvas_roc, title=f"Comparación Curva ROC - {mejor_nombre}")
     if fig_roc is not None:
-        st.pyplot(fig_roc)
+        st.plotly_chart(fig_roc, width="stretch", config={"displayModeBar": False})
     else:
         st.info("No fue posible generar curva ROC para este modelo.")
+
+
+# =========================
+# Datos + Visualizer
+# =========================
+df = load_and_prepare(CSV_NAME)
+viz = Visualizer()
+
+# La vista final solo decide qué página renderizar con los datos ya preparados.
+if menu == "EDA":
+    render_eda_page(viz, df)
+
+if menu == "Resultados modelos":
+    render_model_results_page(viz)
