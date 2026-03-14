@@ -193,6 +193,7 @@ def analyze_time_series(
     date_col: str,
     target_col: str,
     model_name: str,
+    ranking_metric: str,
     lags: int,
     n_splits: int,
     train_pct: int,
@@ -215,6 +216,12 @@ def analyze_time_series(
 
     test_size = max(1, len(model_df) - int(round(len(model_df) * train_size)))
     cv_test_size = max(1, min(test_size, (len(model_df) - lags) // (n_splits + 1)))
+
+    ranking_options = {
+        "Holdout RMSE": "RMSE",
+        "CV RMSE": "CV_RMSE",
+    }
+    sort_column = ranking_options.get(ranking_metric, "RMSE")
 
     evaluation_rows: List[Dict[str, float]] = []
     detailed: Dict[str, Dict[str, object]] = {}
@@ -296,7 +303,7 @@ def analyze_time_series(
             "future_df": future_df,
         }
 
-    results_df = pd.DataFrame(evaluation_rows).sort_values("CV_RMSE", ascending=True).reset_index(drop=True)
+    results_df = pd.DataFrame(evaluation_rows).sort_values(sort_column, ascending=True).reset_index(drop=True)
     best_name = results_df.iloc[0]["Algoritmo"]
 
     return {
@@ -305,6 +312,8 @@ def analyze_time_series(
         "best_name": best_name,
         "best_detail": detailed[best_name],
         "detailed": detailed,
+        "ranking_metric_label": ranking_metric,
+        "ranking_metric_column": sort_column,
         "train_pct": train_pct,
         "test_pct": 100 - train_pct,
         "lags": lags,
@@ -426,20 +435,28 @@ def render_model_page(analysis: Dict[str, object], results_df: pd.DataFrame, bes
     )
 
     best_row = results_df.iloc[0]
+    ranking_metric_label = analysis["ranking_metric_label"]
+    ranking_metric_column = analysis["ranking_metric_column"]
+    ranking_value = best_row[ranking_metric_column]
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        render_metric_card("Mejor modelo", best_name, "Ordenado por menor CV RMSE")
+        render_metric_card("Mejor modelo", best_name, f"Ordenado por menor {ranking_metric_label}")
     with c2:
-        render_metric_card("CV RMSE", f"{best_row['CV_RMSE']:.3f}", f"K-Folds: {analysis['n_splits']}")
+        render_metric_card(ranking_metric_label, f"{ranking_value:.3f}", f"K-Folds: {analysis['n_splits']}")
     with c3:
-        render_metric_card("CV MAE", f"{best_row['CV_MAE']:.3f}", f"Lags: {analysis['lags']}")
+        mae_label = "CV MAE" if ranking_metric_column == "CV_RMSE" else "Holdout MAE"
+        mae_value = best_row["CV_MAE"] if ranking_metric_column == "CV_RMSE" else best_row["MAE"]
+        render_metric_card(mae_label, f"{mae_value:.3f}", f"Lags: {analysis['lags']}")
     with c4:
-        render_metric_card("CV MAPE", f"{best_row['CV_MAPE_%']:.2f}%", f"Train/Test: {analysis['train_pct']}/{analysis['test_pct']}")
+        mape_label = "CV MAPE" if ranking_metric_column == "CV_RMSE" else "Holdout MAPE"
+        mape_value = best_row["CV_MAPE_%"] if ranking_metric_column == "CV_RMSE" else best_row["MAPE_%"]
+        render_metric_card(mape_label, f"{mape_value:.2f}%", f"Train/Test: {analysis['train_pct']}/{analysis['test_pct']}")
 
     left, right = st.columns(2)
     with left:
         st.markdown("<div class='panel-title'>Comparación de métricas por modelo</div>", unsafe_allow_html=True)
-        metrics_long = results_df.melt(id_vars="Algoritmo", value_vars=["CV_RMSE", "CV_MAE", "CV_MAPE_%"], var_name="Métrica", value_name="Valor")
+        metric_columns = ["CV_RMSE", "CV_MAE", "CV_MAPE_%"] if ranking_metric_column == "CV_RMSE" else ["RMSE", "MAE", "MAPE_%"]
+        metrics_long = results_df.melt(id_vars="Algoritmo", value_vars=metric_columns, var_name="Métrica", value_name="Valor")
         fig_bar = viz.grouped_bar_chart(
             metrics_long,
             x="Algoritmo",
@@ -612,6 +629,11 @@ with st.sidebar:
 
     model_names = get_available_models()
     selected_model = st.selectbox("Algoritmo", model_names, index=0)
+    ranking_metric = st.selectbox(
+        "Criterio de selección",
+        ["Holdout RMSE", "CV RMSE"],
+        index=0,
+    )
     lags = st.slider("Cantidad de lags", min_value=3, max_value=30, value=7, step=1)
     n_splits = st.slider("K-Folds temporales", min_value=2, max_value=10, value=5, step=1)
     train_pct = st.slider("Porcentaje entrenamiento", min_value=60, max_value=90, value=80, step=5)
@@ -622,6 +644,7 @@ analysis = analyze_time_series(
     date_col,
     target_col,
     selected_model,
+    ranking_metric,
     lags,
     n_splits,
     train_pct,
