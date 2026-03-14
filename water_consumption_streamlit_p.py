@@ -6,7 +6,6 @@ from sklearn.neural_network import MLPRegressor
 import numpy as np
 import pandas as pd
 import streamlit as st
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from ml_toolkit import ARIMAForecaster, EDAExplorer, HoltWintersForecaster, TimeSeriesRunner, DataPreparer
 from visualizer import Visualizer
@@ -248,30 +247,18 @@ def analyze_time_series(
         runner.fit_full()
         future = runner.forecast(steps=forecast_steps)
 
-        # Estas métricas alimentan el ranking y las tarjetas de la interfaz.
+        # Reutiliza las métricas holdout que ya calcula TimeSeriesRunner en el toolkit.
         pred = runner.fit_predict()
         y_test = runner.y_test
         pred_index = runner.test_index
 
-        rmse = float(np.sqrt(mean_squared_error(y_test, pred)))
-        mae = float(mean_absolute_error(y_test, pred))
-        r2 = float(r2_score(y_test, pred)) if len(y_test) > 1 else np.nan
-        mape = float(
-            np.nanmean(
-                np.abs(
-                    (np.asarray(y_test) - np.asarray(pred)) /
-                    np.where(np.asarray(y_test) == 0, np.nan, np.asarray(y_test))
-                )
-            ) * 100
-        )
-
         evaluation_rows.append(
             {
                 "Algoritmo": name,
-                "MAE": mae,
-                "RMSE": rmse,
-                "MAPE_%": mape,
-                "R2": r2,
+                "MAE": float(holdout.get("MAE", np.nan)),
+                "RMSE": float(holdout.get("RMSE", np.nan)),
+                "MAPE_%": float(holdout.get("MAPE_%", np.nan)),
+                "R2": float(holdout.get("R2", np.nan)),
                 "CV_MAE": float(cv.get("MAE", np.nan)),
                 "CV_RMSE": float(cv.get("RMSE", np.nan)),
                 "CV_MAPE_%": float(cv.get("MAPE_%", np.nan)),
