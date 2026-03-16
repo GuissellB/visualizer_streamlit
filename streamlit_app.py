@@ -20,8 +20,8 @@ from lightgbm import LGBMClassifier
 # =========================
 # CONFIG (igual HTML)
 # =========================
-CSV_NAME = "Phishing_Websites_Data.csv"
-TARGET = "Result"
+CSV_NAME = "Dataset.csv"
+TARGET = "label"
 RANDOM_STATE = 42
 N_SPLITS = 10
 SEMILLAS = [1, 7, 21, 42, 99]

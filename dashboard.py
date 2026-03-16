@@ -27,8 +27,8 @@ from visualizer import Visualizer
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 
-TARGET_COL = "Result"
-DATA_PATH = "Phishing_Websites_Data.csv"
+TARGET_COL = "result"
+DATA_PATH = "fixed_values_ds.csv"
 RANDOM_STATE = 42
 N_SPLITS = 10
 SEMILLAS = [1, 7, 21, 42, 99]
@@ -96,7 +96,18 @@ def load_model_df(csv_name: str) -> pd.DataFrame:
     eda = EDAExplorer(str(csv_path), num=1)
 
     # Mantiene la misma preparación que streamlit_app.py para que el dashboard y el app usen la misma base.
-    eda.df[TARGET_COL] = eda.df[TARGET_COL].map({-1: 0, 1: 1}).astype(int)
+    eda.df[TARGET_COL] = pd.to_numeric(eda.df[TARGET_COL], errors="coerce")
+
+    unique_vals = set(eda.df[TARGET_COL].dropna().unique())
+
+    if unique_vals == {-1, 1}:
+        eda.df[TARGET_COL] = eda.df[TARGET_COL].map({-1: 0, 1: 1})
+    elif unique_vals == {0, 1}:
+        pass
+    else:
+        raise ValueError(f"Valores inesperados en {TARGET_COL}: {sorted(unique_vals)}")
+
+    eda.df[TARGET_COL] = eda.df[TARGET_COL].astype(int)
     eda.eliminarDuplicados().eliminarNulos().analisisCompleto()
 
     return eda.df
