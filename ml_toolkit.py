@@ -19,6 +19,9 @@ from sklearn.metrics import (
 )
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+from imblearn.under_sampling import NearMiss
+from imblearn.over_sampling import RandomOverSampler
+from imblearn.combine import SMOTETomek
 
 # =============================================================================
 # 0) MÉTRICAS (OCP): agregas sin tocar runners
@@ -310,6 +313,7 @@ class SupervisedRunner:
         encode_target: bool = False,
         pos_label: int = 1,
         class_weight: Optional[object] = None,
+        sampling_method: Optional[str] = None,
     ):
         self.df = df
         self.target = target
@@ -322,6 +326,7 @@ class SupervisedRunner:
         self.pos_label = pos_label
         self._label_encoder = None
         self.class_weight = class_weight
+        self.sampling_method = sampling_method
 
         if metrics is None:
             if self.task == "classification":
@@ -335,31 +340,83 @@ class SupervisedRunner:
 
         self._prepared = False
 
-        if self.task == "classification" and self.class_weight is not None:
-            # El balanceo se activa aquí: si el modelo soporta class_weight,
-            # el runner le inyecta el valor recibido desde la app.
-            self._set_class_weight_if_supported(self.class_weight)
+    def _build_sampler(self):
+        # Construye el sampler indicado para aplicarlo solo sobre el set de entrenamiento.
+        if self.sampling_method is None:
+            return None
 
-    def _set_class_weight_if_supported(self, class_weight: object = None):
-        # Aplica class_weight a modelos de clasificación que exponen ese parámetro.
+        method = self.sampling_method.lower()
+
+        if method == "undersample":
+            return NearMiss()
+
+        if method == "oversample":
+            return RandomOverSampler(random_state=self.preparer.random_state)
+
+        if method == "smote_tomek":
+            return SMOTETomek(random_state=self.preparer.random_state)
+
+        raise ValueError(
+            "sampling_method debe ser uno de: None, 'undersample', 'oversample', 'smote_tomek'"
+        )
+
+    def _compute_scale_pos_weight(self, y: np.ndarray, pos_label: int = 1) -> float:
+        # XGBoost usa la razón negativos/positivos calculada sobre el y de entrenamiento.
+        y_arr = pd.to_numeric(pd.Series(y), errors="coerce")
+        pos_count = int((y_arr == pos_label).sum())
+        neg_count = int((y_arr != pos_label).sum())
+
+        if pos_count == 0:
+            return 1.0
+
+        return max(neg_count / pos_count, 1.0)
+
+    def _apply_class_balancing(self, model, y_train: np.ndarray, class_weight: object = None):
+        # Aplica balanceo a modelos de clasificación según los parámetros que expongan.
         if class_weight is None:
-            return self.model
+            return model
 
         try:
-            params = self.model.get_params(deep=True)
+            params = model.get_params(deep=True)
         except Exception:
-            return self.model
+            return model
 
-        keys = []
+        updates = {}
+
+        class_weight_keys = []
         if "class_weight" in params:
-            keys.append("class_weight")
-        keys.extend([k for k in params.keys() if k.endswith("__class_weight")])
+            class_weight_keys.append("class_weight")
+        class_weight_keys.extend([k for k in params.keys() if k.endswith("__class_weight")])
 
-        if not keys:
-            return self.model
+        if class_weight_keys:
+            updates.update({k: class_weight for k in class_weight_keys})
 
-        self.model.set_params(**{k: class_weight for k in keys})
-        return self.model
+        scale_pos_weight_keys = []
+        if "scale_pos_weight" in params:
+            scale_pos_weight_keys.append("scale_pos_weight")
+        scale_pos_weight_keys.extend([k for k in params.keys() if k.endswith("__scale_pos_weight")])
+
+        if scale_pos_weight_keys:
+            scale_pos_weight = self._compute_scale_pos_weight(y_train, pos_label=self.pos_label)
+            updates.update({k: scale_pos_weight for k in scale_pos_weight_keys})
+
+        if not updates:
+            return model
+
+        model.set_params(**updates)
+        return model
+
+    def _apply_sampling(self, X_train, y_train):
+        # Aplica resampling solo a entrenamiento para evitar fuga de información.
+        if self.task != "classification" or self.sampling_method is None:
+            return X_train, y_train
+
+        sampler = self._build_sampler()
+        if sampler is None:
+            return X_train, y_train
+
+        X_resampled, y_resampled = sampler.fit_resample(X_train, y_train)
+        return X_resampled, y_resampled
 
     def _y_transform(self, y: pd.Series) -> np.ndarray:
         if self.task == "classification":
@@ -382,10 +439,19 @@ class SupervisedRunner:
         )
         self._prepared = True
 
+    def get_model_for_current_split(self):
+        # Devuelve el modelo configurado con el balanceo que corresponde al y_train actual.
+        if not self._prepared:
+            self._prepare()
+        _, y_train = self._apply_sampling(self.X_train, self.y_train)
+        return self._apply_class_balancing(self.model, y_train, self.class_weight)
+
     def fit_predict(self) -> np.ndarray:
         if not self._prepared:
             self._prepare()
-        self.model.fit(self.X_train, self.y_train)
+        X_train_fit, y_train_fit = self._apply_sampling(self.X_train, self.y_train)
+        self.model = self._apply_class_balancing(self.model, y_train_fit, self.class_weight)
+        self.model.fit(X_train_fit, y_train_fit)
         return self.model.predict(self.X_test)
 
     def evaluate(self) -> Dict[str, object]:
@@ -418,8 +484,10 @@ class SupervisedRunner:
             y_train, y_test = y[tr], y[te]
 
             X_train, X_test = self.preparer.scale_train_test(X_train, X_test, cols=cols, clone_scaler=True)
+            X_train, y_train = self._apply_sampling(X_train, y_train)
 
             model_fold = clone(self.model)
+            model_fold = self._apply_class_balancing(model_fold, y_train, self.class_weight)
             model_fold.fit(X_train, y_train)
             yp = model_fold.predict(X_test)
 

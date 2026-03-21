@@ -121,7 +121,7 @@ def compute_model_results(
             task="classification",
             preparer=prep,
             pos_label=1,
-            # Esta bandera activa el balanceo en el toolkit cuando el modelo soporta class_weight.
+            # El toolkit aplica aquí el balanceo adecuado para cada modelo.
             class_weight=CLASS_WEIGHT,
         )
 
@@ -174,7 +174,7 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
             task="classification",
             preparer=prep,
             pos_label=1,
-            # Reutiliza el mismo balanceo por class_weight definido para clasificación.
+            # Reutiliza la misma política de balanceo centralizada en el toolkit.
             class_weight=CLASS_WEIGHT,
         )
 
@@ -203,7 +203,7 @@ def compute_stability(csv_name: str, target: str, best_model_name: str, seeds: l
 def compute_best_model_balance_compare(
     csv_name: str, target: str, best_model_name: str, seed: int
 ):
-    # Compara el mejor modelo con y sin class_weight para medir el efecto del balanceo.
+    # Compara el mejor modelo con y sin balanceo usando la estrategia propia de cada estimador.
     df_local = load_and_prepare(csv_name)
     estandarizar = best_model_name in ["Regresión Logística", "SVM"]
 
@@ -230,7 +230,7 @@ def compute_best_model_balance_compare(
             task="classification",
             preparer=prep,
             pos_label=1,
-            # Aquí se compara explícitamente el modelo con y sin balanceo.
+            # El toolkit decide si balancea con class_weight o scale_pos_weight.
             class_weight=cw,
         )
 

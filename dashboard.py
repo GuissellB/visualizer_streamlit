@@ -21,19 +21,25 @@ from sklearn.metrics import (
     precision_recall_curve,
 )
 
+from app_config import (
+    BALANCE_METHOD_OPTIONS,
+    CLASS_WEIGHT,
+    CV_CRITERION_OPTIONS,
+    DATA_PATH,
+    DEFAULT_BEST_MODEL_CRITERION,
+    DEFAULT_NO_CV_CRITERION,
+    NO_CV_CRITERION_OPTIONS,
+    N_SPLITS,
+    RANDOM_STATE,
+    SEMILLAS,
+    TARGET_COL,
+)
 from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner, get_positive_score
+from model_config import MODEL_DEFAULT_PARAMS, MODEL_PARAM_SCHEMA, SHARED_PARAM_SCHEMA
 from visualizer import Visualizer
 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-
-TARGET_COL = "result"
-DATA_PATH = "fixed_values_ds.csv"
-RANDOM_STATE = 42
-N_SPLITS = 10
-SEMILLAS = [1, 7, 21, 42, 99]
-CLASS_WEIGHT = "balanced"
-DEFAULT_BEST_MODEL_CRITERION = "ROC_AUC_CV_mean"
 
 @st.cache_data
 def load_eda_data(path: str):
@@ -73,16 +79,236 @@ def load_eda_data(path: str):
 def crear_modelo(nombre: str, random_state: int):
     # Centraliza la construcción de modelos para reutilizarla en ranking y evaluación detallada.
     if nombre == "Regresión Logística":
-        return LogisticRegression(random_state=random_state, solver="liblinear")
+        return LogisticRegression(random_state=random_state, **MODEL_DEFAULT_PARAMS[nombre])
     if nombre == "Random Forest":
-        return RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)
+        return RandomForestClassifier(random_state=random_state, **MODEL_DEFAULT_PARAMS[nombre])
     if nombre == "XGBoost":
-        return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)
+        return XGBClassifier(random_state=random_state, **MODEL_DEFAULT_PARAMS[nombre])
     if nombre == "LightGBM":
-        return LGBMClassifier(random_state=random_state)
+        return LGBMClassifier(random_state=random_state, **MODEL_DEFAULT_PARAMS[nombre])
     if nombre == "SVM":
-        return SVC(kernel="rbf", probability=True, random_state=random_state)
+        return SVC(random_state=random_state, **MODEL_DEFAULT_PARAMS[nombre])
     raise ValueError(f"Modelo no reconocido: {nombre}")
+
+
+def parse_optional_value(raw_value: str, value_type: str):
+    if raw_value is None:
+        return None
+
+    raw_value = str(raw_value).strip()
+    if raw_value == "":
+        return None
+
+    if value_type == "int":
+        return int(raw_value)
+    if value_type == "float":
+        return float(raw_value)
+    return raw_value
+
+
+def normalize_param_value(value):
+    if value == "None":
+        return None
+    return value
+
+
+def parse_seed_list(raw_value: str) -> list:
+    if raw_value is None:
+        return list(SEMILLAS)
+    values = [item.strip() for item in str(raw_value).split(",") if item.strip()]
+    if not values:
+        return list(SEMILLAS)
+    return [int(item) for item in values]
+
+
+def parse_seed_list_with_validation(raw_value: str) -> tuple[list, str | None]:
+    if raw_value is None or str(raw_value).strip() == "":
+        return list(SEMILLAS), None
+
+    values = [item.strip() for item in str(raw_value).split(",") if item.strip()]
+    invalid_values = [item for item in values if not item.lstrip("-").isdigit()]
+    if invalid_values:
+        return (
+            list(SEMILLAS),
+            f"Hay valores inválidos en la lista de semillas: {', '.join(invalid_values)}. Usa números enteros separados por comas.",
+        )
+
+    return [int(item) for item in values], None
+
+
+def build_model_params(model_name: str, random_state: int, shared_overrides: dict, model_overrides: dict) -> dict:
+    params = dict(MODEL_DEFAULT_PARAMS[model_name])
+    compatible_shared = {k: v for k, v in shared_overrides.items() if k in params and v is not None}
+    compatible_specific = {k: v for k, v in model_overrides.items() if v is not None}
+    params.update(compatible_shared)
+    params.update(compatible_specific)
+    params["random_state"] = random_state
+    return params
+
+
+def crear_modelo_configurable(nombre: str, random_state: int, shared_overrides: dict, model_overrides: dict):
+    params = build_model_params(nombre, random_state, shared_overrides, model_overrides)
+    if nombre == "Regresión Logística":
+        return LogisticRegression(**params)
+    if nombre == "Random Forest":
+        return RandomForestClassifier(**params)
+    if nombre == "XGBoost":
+        return XGBClassifier(**params)
+    if nombre == "LightGBM":
+        return LGBMClassifier(**params)
+    if nombre == "SVM":
+        return SVC(**params)
+    raise ValueError(f"Modelo no reconocido: {nombre}")
+
+
+def get_runner_balance_config(balance_method: str) -> dict:
+    if balance_method == "class_weight":
+        return {"class_weight": CLASS_WEIGHT, "sampling_method": None}
+    if balance_method in {"undersample", "oversample", "smote_tomek"}:
+        return {"class_weight": None, "sampling_method": balance_method}
+    return {"class_weight": None, "sampling_method": None}
+
+
+def get_available_criteria(use_cv: bool) -> dict:
+    return CV_CRITERION_OPTIONS if use_cv else NO_CV_CRITERION_OPTIONS
+
+
+def get_default_selection_criterion(use_cv: bool) -> str:
+    return DEFAULT_BEST_MODEL_CRITERION if use_cv else DEFAULT_NO_CV_CRITERION
+
+
+def get_selection_criterion_label(selected_criterion: str, use_cv: bool) -> str:
+    return get_available_criteria(use_cv).get(selected_criterion, selected_criterion)
+
+
+def get_balance_display(balance_method: str, model=None) -> dict:
+    if balance_method == "class_weight" and model is not None:
+        params = model.get_params()
+
+        if "scale_pos_weight" in params and params["scale_pos_weight"] not in (None, 1):
+            return {
+                "name": "Scale Pos Weight",
+                "value": f"{params['scale_pos_weight']:.4f}",
+                "description": "Relación clase negativa/positiva para XGBoost",
+            }
+
+        return {
+            "name": "Class Weight",
+            "value": str(params.get("class_weight", CLASS_WEIGHT)),
+            "description": "Balance de clases por pesos",
+        }
+
+    display_map = {
+        "none": {
+            "name": "Balanceo",
+            "value": BALANCE_METHOD_OPTIONS["none"],
+            "description": "Sin ajuste de clases",
+        },
+        "undersample": {
+            "name": "Balanceo",
+            "value": BALANCE_METHOD_OPTIONS["undersample"],
+            "description": "Reduce ejemplos de la clase mayoritaria",
+        },
+        "oversample": {
+            "name": "Balanceo",
+            "value": BALANCE_METHOD_OPTIONS["oversample"],
+            "description": "Aumenta ejemplos de la clase minoritaria",
+        },
+        "smote_tomek": {
+            "name": "Balanceo",
+            "value": BALANCE_METHOD_OPTIONS["smote_tomek"],
+            "description": "Generación sintética y limpieza de clases solapadas",
+        },
+    }
+
+    return display_map.get(balance_method, display_map["none"])
+
+
+def render_text_param_input(widget_key: str, param_key: str, config: dict):
+    return st.text_input(
+        config["label"],
+        value="",
+        key=widget_key,
+        placeholder="Default",
+        help=config.get("help", f"Déjalo vacío para usar el valor por defecto de {param_key}."),
+    )
+
+
+def collect_shared_param_overrides() -> dict:
+    overrides = {}
+    with st.expander("Hiperparámetros compartidos", expanded=False):
+        st.caption("Déjalos vacíos para usar los valores por defecto.")
+        for param_key, config in SHARED_PARAM_SCHEMA.items():
+            raw_value = render_text_param_input(f"shared_{param_key}", param_key, config)
+            overrides[param_key] = parse_optional_value(raw_value, config["type"])
+    return overrides
+
+
+def collect_model_param_overrides() -> dict:
+    overrides = {}
+    with st.expander("Hiperparámetros por modelo", expanded=False):
+        st.caption("Solo se aplican al modelo correspondiente. Si no llenas el campo, se conserva el default.")
+        for model_name, schema in MODEL_PARAM_SCHEMA.items():
+            with st.expander(model_name, expanded=False):
+                model_values = {}
+                for param_key, config in schema.items():
+                    widget_key = f"{model_name}_{param_key}"
+                    if config["type"] == "select":
+                        value = st.selectbox(
+                            config["label"],
+                            options=["Default"] + config["options"],
+                            key=widget_key,
+                        )
+                        model_values[param_key] = None if value == "Default" else normalize_param_value(value)
+                    elif config["type"] == "select_or_text":
+                        value = st.selectbox(
+                            config["label"],
+                            options=["Default"] + config["options"],
+                            key=widget_key,
+                        )
+                        model_values[param_key] = None if value == "Default" else value
+                    else:
+                        raw_value = render_text_param_input(widget_key, param_key, config)
+                        model_values[param_key] = parse_optional_value(raw_value, config["type"])
+                overrides[model_name] = model_values
+    return overrides
+
+
+def get_configured_model(
+    nombre: str,
+    random_state: int,
+    train_size: float,
+    df_local: pd.DataFrame,
+    target: str,
+    balance_method: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
+):
+    # Delega al toolkit la aplicación del balanceo y devuelve el modelo ya configurado.
+    estandarizar = nombre in ["Regresión Logística", "SVM"]
+    balance_config = get_runner_balance_config(balance_method)
+    prep = DataPreparer(
+        train_size=train_size,
+        random_state=random_state,
+        scale_X=estandarizar
+    )
+    model = crear_modelo_configurable(
+        nombre,
+        random_state=random_state,
+        shared_overrides=shared_param_overrides,
+        model_overrides=model_param_overrides.get(nombre, {}),
+    )
+    runner = SupervisedRunner(
+        df=df_local,
+        target=target,
+        model=model,
+        task="classification",
+        preparer=prep,
+        pos_label=1,
+        class_weight=balance_config["class_weight"],
+        sampling_method=balance_config["sampling_method"],
+    )
+    return runner.get_model_for_current_split()
 
 
 @st.cache_data(show_spinner=False)
@@ -115,29 +341,41 @@ def load_model_df(csv_name: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def compute_model_results_dashboard(
-    csv_name: str, target: str, random_state: int, n_splits: int
+    csv_name: str,
+    target: str,
+    random_state: int,
+    n_splits: int,
+    train_size: float,
+    use_cv: bool,
+    balance_method: str,
+    best_model_criterion: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
 ) -> pd.DataFrame:
     # Compara modelos con SupervisedRunner del toolkit y devuelve la tabla base del ranking.
     df_local = load_model_df(csv_name)
 
     modelos = [
-        ("Regresión Logística", LogisticRegression(random_state=random_state, solver="liblinear")),
-        ("Random Forest", RandomForestClassifier(n_estimators=200, max_depth=10, random_state=random_state)),
-        ("SVM", SVC(kernel="rbf", probability=True, random_state=random_state)),
+        "Regresión Logística",
+        "Random Forest",
+        "SVM",
+        "XGBoost",
+        "LightGBM",
     ]
 
-    # Si tienes instalados XGBoost y LightGBM, descomenta:
-    modelos.extend([
-        ("XGBoost", XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=random_state)),
-        ("LightGBM", LGBMClassifier(random_state=random_state)),
-    ])
-
     resultados = []
-    for nombre, modelo in modelos:
+    for nombre in modelos:
         estandarizar = nombre in ["Regresión Logística", "SVM"]
+        balance_config = get_runner_balance_config(balance_method)
+        modelo = crear_modelo_configurable(
+            nombre,
+            random_state=random_state,
+            shared_overrides=shared_param_overrides,
+            model_overrides=model_param_overrides.get(nombre, {}),
+        )
 
         prep = DataPreparer(
-            train_size=0.75,
+            train_size=train_size,
             random_state=random_state,
             scale_X=estandarizar
         )
@@ -149,13 +387,13 @@ def compute_model_results_dashboard(
             task="classification",
             preparer=prep,
             pos_label=1,
-            # Esta opción delega el balanceo al toolkit vía class_weight.
-            class_weight=CLASS_WEIGHT,
+            # El toolkit decide qué balanceo aplicar según la estrategia seleccionada.
+            class_weight=balance_config["class_weight"],
+            sampling_method=balance_config["sampling_method"],
         )
 
         m = runner.evaluate()
-        # La comparación de modelos usa validación cruzada de clasificación del toolkit.
-        cv = runner.evaluate_cv(n_splits=n_splits)
+        cv = runner.evaluate_cv(n_splits=n_splits) if use_cv else {}
 
         resultados.append({
             "Modelo": nombre,
@@ -170,9 +408,7 @@ def compute_model_results_dashboard(
             "ROC_AUC_CV_std": cv.get("ROC_AUC_Pos_std"),
         })
 
-    return pd.DataFrame(resultados).sort_values(
-        DEFAULT_BEST_MODEL_CRITERION, ascending=False
-    ).reset_index(drop=True)
+    return pd.DataFrame(resultados).sort_values(best_model_criterion, ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
@@ -181,15 +417,25 @@ def compute_best_model_dashboard(
     target: str,
     best_model_name: str,
     seed: int,
+    train_size: float,
+    balance_method: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
 ):
     # Evalúa en detalle el mejor modelo y arma las salidas que luego usa la página de rendimiento.
     df_local = load_model_df(csv_name)
 
-    model = crear_modelo(best_model_name, random_state=seed)
+    model = crear_modelo_configurable(
+        best_model_name,
+        random_state=seed,
+        shared_overrides=shared_param_overrides,
+        model_overrides=model_param_overrides.get(best_model_name, {}),
+    )
     estandarizar = best_model_name in ["Regresión Logística", "SVM"]
+    balance_config = get_runner_balance_config(balance_method)
 
     prep = DataPreparer(
-        train_size=0.75,
+        train_size=train_size,
         random_state=seed,
         scale_X=estandarizar
     )
@@ -201,8 +447,9 @@ def compute_best_model_dashboard(
     task="classification",
     preparer=prep,
     pos_label=1,
-    # La evaluación detallada también conserva el balanceo configurado para clasificación.
-    class_weight=CLASS_WEIGHT,
+    # El toolkit aplica la estrategia de balanceo seleccionada.
+    class_weight=balance_config["class_weight"],
+    sampling_method=balance_config["sampling_method"],
     )
 
     y_pred = runner.fit_predict()
@@ -254,6 +501,65 @@ def compute_best_model_dashboard(
         "pr_df": pr_payload,
         "test_size": int(len(y_true)),
     }
+
+
+@st.cache_data(show_spinner=False)
+def compute_stability_dashboard(
+    csv_name: str,
+    target: str,
+    best_model_name: str,
+    seeds: tuple,
+    train_size: float,
+    use_cv: bool,
+    n_splits: int,
+    balance_method: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
+) -> pd.DataFrame:
+    df_local = load_model_df(csv_name)
+    results = []
+
+    for seed in seeds:
+        model = crear_modelo_configurable(
+            best_model_name,
+            random_state=seed,
+            shared_overrides=shared_param_overrides,
+            model_overrides=model_param_overrides.get(best_model_name, {}),
+        )
+        estandarizar = best_model_name in ["Regresión Logística", "SVM"]
+        balance_config = get_runner_balance_config(balance_method)
+
+        prep = DataPreparer(
+            train_size=train_size,
+            random_state=seed,
+            scale_X=estandarizar
+        )
+
+        runner = SupervisedRunner(
+            df=df_local,
+            target=target,
+            model=model,
+            task="classification",
+            preparer=prep,
+            pos_label=1,
+            class_weight=balance_config["class_weight"],
+            sampling_method=balance_config["sampling_method"],
+        )
+
+        m = runner.evaluate()
+        cv = runner.evaluate_cv(n_splits=n_splits) if use_cv else {}
+
+        results.append({
+            "Seed": seed,
+            "Accuracy_Global": m.get("Accuracy"),
+            "F1_Global": m.get("F1_Pos"),
+            "ROC_AUC_Global": m.get("ROC_AUC_Pos"),
+            "Accuracy_CV_mean": cv.get("Accuracy"),
+            "F1_CV_mean": cv.get("F1_Pos"),
+            "ROC_AUC_CV_mean": cv.get("ROC_AUC_Pos"),
+        })
+
+    return pd.DataFrame(results).sort_values("Seed").reset_index(drop=True)
 
 st.set_page_config(
     page_title="Phishing Detection Dashboard",
@@ -702,14 +1008,78 @@ def panel_close() -> None:
 
 df_eda, eda_summary = load_eda_data(DATA_PATH)
 
-model_results_df = compute_model_results_dashboard(DATA_PATH, TARGET_COL, RANDOM_STATE, N_SPLITS)
+df_model_base = load_model_df(DATA_PATH)
+
+with st.sidebar:
+    # La barra lateral solo controla navegación y configuración del modelado.
+    st.markdown("## 🛡️ Phishing Detection")
+    st.caption("Dashboard Analytics")
+    page = st.radio(
+        "Navegación",
+        [
+            "EDA - Análisis Exploratorio",
+            "Rendimiento del Algoritmo",
+            "Parametrización del Modelo",
+            "Estabilidad del Modelo",
+        ],
+        label_visibility="collapsed",
+    )
+    st.markdown("---")
+    selected_balance_method = st.selectbox(
+        "Método de balanceo",
+        options=list(BALANCE_METHOD_OPTIONS.keys()),
+        format_func=lambda x: BALANCE_METHOD_OPTIONS[x],
+        index=0,
+    )
+    use_cross_validation = st.toggle("Usar cross-validation", value=True)
+    selected_n_splits = st.slider("Folds CV", min_value=3, max_value=10, value=N_SPLITS) if use_cross_validation else 0
+    criterion_options = get_available_criteria(use_cross_validation)
+    selected_criterion = st.selectbox(
+        "Criterio para mejor modelo",
+        options=list(criterion_options.keys()),
+        format_func=lambda x: criterion_options[x],
+        index=list(criterion_options.keys()).index(get_default_selection_criterion(use_cross_validation)),
+    )
+    with st.expander("Configuración experimental", expanded=False):
+        selected_random_state = st.number_input("random_state", min_value=0, value=RANDOM_STATE, step=1)
+        selected_train_size = st.slider("train_size", min_value=0.5, max_value=0.9, value=0.75, step=0.05)
+    shared_param_overrides = collect_shared_param_overrides()
+    model_param_overrides = collect_model_param_overrides()
+    st.markdown(
+        f"""
+        <div class="status-box">
+            <div>● Sistema Activo</div>
+            <div class="small-muted" style="margin-top:0.35rem;">
+                Última actualización: {datetime.now().strftime('%H:%M:%S')}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+model_results_df = compute_model_results_dashboard(
+    DATA_PATH,
+    TARGET_COL,
+    int(selected_random_state),
+    selected_n_splits,
+    selected_train_size,
+    use_cross_validation,
+    selected_balance_method,
+    selected_criterion,
+    shared_param_overrides,
+    model_param_overrides,
+)
 best_model_name = model_results_df.iloc[0]["Modelo"]
 
 best_model_payload = compute_best_model_dashboard(
     DATA_PATH,
     TARGET_COL,
     best_model_name,
-    RANDOM_STATE,
+    int(selected_random_state),
+    selected_train_size,
+    selected_balance_method,
+    shared_param_overrides,
+    model_param_overrides,
 )
 @st.cache_data(show_spinner=False)
 def get_best_model_row(results_df: pd.DataFrame) -> dict:
@@ -717,8 +1087,24 @@ def get_best_model_row(results_df: pd.DataFrame) -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def get_best_model_params_dict(best_model_name: str, seed: int) -> pd.DataFrame:
-    model = crear_modelo(best_model_name, random_state=seed)
+def get_best_model_params_dict(
+    best_model_name: str,
+    seed: int,
+    train_size: float,
+    balance_method: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
+) -> pd.DataFrame:
+    model = get_configured_model(
+        best_model_name,
+        random_state=seed,
+        train_size=train_size,
+        df_local=df_model_base,
+        target=TARGET_COL,
+        balance_method=balance_method,
+        shared_param_overrides=shared_param_overrides,
+        model_param_overrides=model_param_overrides,
+    )
     params = model.get_params()
 
     param_whitelist = {
@@ -734,7 +1120,7 @@ def get_best_model_params_dict(best_model_name: str, seed: int) -> pd.DataFrame:
         ],
         "XGBoost": [
             "n_estimators", "max_depth", "learning_rate", "subsample",
-            "colsample_bytree", "objective", "eval_metric", "random_state"
+            "colsample_bytree", "objective", "eval_metric", "scale_pos_weight", "random_state"
         ],
         "LightGBM": [
             "n_estimators", "learning_rate", "max_depth", "num_leaves",
@@ -745,6 +1131,12 @@ def get_best_model_params_dict(best_model_name: str, seed: int) -> pd.DataFrame:
     selected_keys = param_whitelist.get(best_model_name, list(params.keys()))
 
     rows = []
+    if balance_method in {"undersample", "oversample", "smote_tomek"}:
+        rows.append({
+            "Parámetro": "sampling_method",
+            "Valor": balance_method,
+        })
+
     for key in selected_keys:
         if key in params:
             rows.append({
@@ -765,38 +1157,27 @@ real_confusion = best_model_payload["confusion"]
 real_roc_df = best_model_payload["roc_df"]
 real_pr_df = best_model_payload["pr_df"]
 best_model_row = get_best_model_row(model_results_df)
-best_model_params_df = get_best_model_params_dict(best_model_name, RANDOM_STATE)
+best_model_params_df = get_best_model_params_dict(
+    best_model_name,
+    int(selected_random_state),
+    selected_train_size,
+    selected_balance_method,
+    shared_param_overrides,
+    model_param_overrides,
+)
+configured_best_model = get_configured_model(
+    best_model_name,
+    int(selected_random_state),
+    selected_train_size,
+    df_model_base,
+    TARGET_COL,
+    selected_balance_method,
+    shared_param_overrides,
+    model_param_overrides,
+)
+best_model_balance_display = get_balance_display(selected_balance_method, configured_best_model)
 real_feature_cols = get_real_feature_columns(DATA_PATH, TARGET_COL)
 viz = Visualizer()
-
-# =========================
-# Sidebar
-# =========================
-with st.sidebar:
-    # La barra lateral solo controla navegación; el contenido de cada página se calcula abajo.
-    st.markdown("## 🛡️ Phishing Detection")
-    st.caption("Dashboard Analytics")
-    page = st.radio(
-        "Navegación",
-        [
-            "EDA - Análisis Exploratorio",
-            "Rendimiento del Algoritmo",
-            "Parametrización del Modelo",
-        ],
-        label_visibility="collapsed",
-    )
-    st.markdown("---")
-    st.markdown(
-        f"""
-        <div class="status-box">
-            <div>● Sistema Activo</div>
-            <div class="small-muted" style="margin-top:0.35rem;">
-                Última actualización: {datetime.now().strftime('%H:%M:%S')}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 # =========================
 # Página 1: EDA
@@ -983,43 +1364,152 @@ elif page == "Rendimiento del Algoritmo":
     with err3:
         metric_panel_card("Tasa de Error Total", "Porcentaje total de clasificaciones incorrectas.", f"{real_metrics['error_rate'] * 100:.3f}%", "#2563eb")
 
-    panel_open("Comparación de modelos", "Ranking de modelos según ROC_AUC_CV_mean.")
+    ranking_subtitle = (
+        f"Ranking de modelos según {get_selection_criterion_label(selected_criterion, use_cross_validation)}."
+    )
+    panel_open("Comparación de modelos", ranking_subtitle)
     st.dataframe(model_results_df.round(4), width="stretch", hide_index=True)
     panel_close()
 # =========================
 # Página 3: Parámetros
 # =========================
-else:
+elif page == "Parametrización del Modelo":
     # Página de parametrización: muestra cómo quedó configurado el modelo ganador.
     hero(
         "Parametrización del Modelo",
         f"Configuración real del mejor modelo seleccionado: {best_model_name}.",
     )
 
-    c1, c2, c3, c4 = st.columns(4, gap="medium")
+    c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
     with c1:
-        metric_card("Modelo ganador", best_model_name, "Seleccionado por desempeño CV", "#2563eb")
+        winner_caption = "Seleccionado por desempeño CV" if use_cross_validation else "Seleccionado por desempeño global"
+        metric_card("Modelo ganador", best_model_name, winner_caption, "#2563eb")
     with c2:
-        metric_card("Semilla", str(RANDOM_STATE), "Reproducibilidad", "#7c3aed")
+        metric_card("Semilla", str(int(selected_random_state)), "Reproducibilidad", "#7c3aed")
     with c3:
-        metric_card("Cross-Validation", f"{N_SPLITS}-fold", "Evaluación cruzada", "#06b6d4")
+        cv_value = f"{selected_n_splits}-fold" if use_cross_validation else "Desactivado"
+        cv_description = "Evaluación cruzada" if use_cross_validation else "Se usan métricas globales"
+        metric_card("Cross-Validation", cv_value, cv_description, "#06b6d4")
     with c4:
-        metric_card("Class Weight", str(CLASS_WEIGHT), "Balance de clases", "#10b981")
+        metric_card("Train Size", f"{selected_train_size:.2f}", "Proporción usada para entrenamiento", "#f59e0b")
+    with c5:
+        metric_card(
+            best_model_balance_display["name"],
+            best_model_balance_display["value"],
+            best_model_balance_display["description"],
+            "#10b981",
+        )
 
     panel_open("Resumen de selección del modelo", "Información usada para elegir el modelo ganador.")
     s1, s2, s3 = st.columns(3, gap="medium")
 
     with s1:
-        metric_panel_card("Criterio principal", "Métrica usada para ordenar el ranking.", DEFAULT_BEST_MODEL_CRITERION, "#2563eb")
+        metric_panel_card(
+            "Criterio principal",
+            "Métrica usada para ordenar el ranking.",
+            get_selection_criterion_label(selected_criterion, use_cross_validation),
+            "#2563eb",
+        )
 
     with s2:
-        metric_panel_card("ROC_AUC_CV_mean", "Valor promedio del mejor modelo en validación cruzada.", f"{best_model_row['ROC_AUC_CV_mean']:.4f}", "#7c3aed")
+        metric_2_label = "ROC_AUC_CV_mean" if use_cross_validation else "ROC_AUC_Global"
+        metric_2_desc = "Valor promedio del mejor modelo en validación cruzada." if use_cross_validation else "Valor global del mejor modelo."
+        metric_2_value = best_model_row["ROC_AUC_CV_mean"] if use_cross_validation else best_model_row["ROC_AUC_Global"]
+        metric_panel_card(metric_2_label, metric_2_desc, f"{metric_2_value:.4f}", "#7c3aed")
 
     with s3:
-        metric_panel_card("Accuracy_CV_mean", "Exactitud promedio del mejor modelo en validación cruzada.", f"{best_model_row['Accuracy_CV_mean']:.4f}", "#06b6d4")
+        metric_3_label = "Accuracy_CV_mean" if use_cross_validation else "Accuracy_Global"
+        metric_3_desc = "Exactitud promedio del mejor modelo en validación cruzada." if use_cross_validation else "Exactitud global del mejor modelo."
+        metric_3_value = best_model_row["Accuracy_CV_mean"] if use_cross_validation else best_model_row["Accuracy_Global"]
+        metric_panel_card(metric_3_label, metric_3_desc, f"{metric_3_value:.4f}", "#06b6d4")
     panel_close()
 
     panel_open("Hiperparámetros reales del modelo ganador", "Parámetros obtenidos directamente desde get_params().")
     st.dataframe(best_model_params_df, width="stretch", hide_index=True)
+    panel_close()
+
+# =========================
+# Página 4: Estabilidad
+# =========================
+else:
+    hero(
+        "Estabilidad del Modelo",
+        f"Variación del mejor modelo seleccionado ({best_model_name}) a través de distintas semillas.",
+    )
+
+    if "stability_seed_text" not in st.session_state:
+        st.session_state["stability_seed_text"] = ", ".join(str(seed) for seed in SEMILLAS)
+
+    seed_text = st.text_input(
+        "Semillas para estabilidad",
+        key="stability_seed_text",
+        help="Separadas por comas. Se usan solo en esta página para el análisis de estabilidad.",
+    )
+    selected_seed_list, seed_validation_error = parse_seed_list_with_validation(seed_text)
+    if seed_validation_error:
+        st.error(seed_validation_error)
+        st.caption(f"Usando temporalmente la lista por defecto: {', '.join(str(seed) for seed in SEMILLAS)}")
+    stability_df = compute_stability_dashboard(
+        DATA_PATH,
+        TARGET_COL,
+        best_model_name,
+        tuple(selected_seed_list),
+        selected_train_size,
+        use_cross_validation,
+        selected_n_splits,
+        selected_balance_method,
+        shared_param_overrides,
+        model_param_overrides,
+    )
+
+    stability_metric_col_1, stability_metric_col_2, stability_metric_col_3 = st.columns(3, gap="medium")
+
+    if use_cross_validation:
+        stability_primary_series = stability_df["ROC_AUC_CV_mean"].dropna()
+        stability_secondary_series = stability_df["Accuracy_CV_mean"].dropna()
+        stability_primary_label = "ROC AUC CV"
+        stability_secondary_label = "Accuracy CV"
+    else:
+        stability_primary_series = stability_df["ROC_AUC_Global"].dropna()
+        stability_secondary_series = stability_df["Accuracy_Global"].dropna()
+        stability_primary_label = "ROC AUC Global"
+        stability_secondary_label = "Accuracy Global"
+
+    with stability_metric_col_1:
+        metric_card("Modelo evaluado", best_model_name, "Mejor modelo actual", "#2563eb")
+    with stability_metric_col_2:
+        metric_card("Semillas", str(len(selected_seed_list)), "Cantidad de ejecuciones evaluadas", "#7c3aed")
+    with stability_metric_col_3:
+        spread_value = stability_primary_series.std() if not stability_primary_series.empty else 0.0
+        metric_card("Desv. estándar", f"{spread_value:.4f}", f"Variación de {stability_primary_label}", "#06b6d4")
+
+    panel_open("Resumen de estabilidad", "Promedio y variación de las métricas por semilla.")
+    sum_col_1, sum_col_2, sum_col_3 = st.columns(3, gap="medium")
+
+    with sum_col_1:
+        metric_panel_card(
+            f"Promedio {stability_primary_label}",
+            "Media entre semillas evaluadas.",
+            f"{stability_primary_series.mean():.4f}" if not stability_primary_series.empty else "N/A",
+            "#2563eb",
+        )
+    with sum_col_2:
+        metric_panel_card(
+            f"Promedio {stability_secondary_label}",
+            "Comportamiento medio del modelo entre semillas.",
+            f"{stability_secondary_series.mean():.4f}" if not stability_secondary_series.empty else "N/A",
+            "#7c3aed",
+        )
+    with sum_col_3:
+        metric_panel_card(
+            "Semillas usadas",
+            "Lista de semillas configuradas para el análisis.",
+            ", ".join(str(seed) for seed in selected_seed_list),
+            "#10b981",
+        )
+    panel_close()
+
+    panel_open("Resultados por semilla", "Cada fila representa una corrida completa del mejor modelo con una semilla distinta.")
+    st.dataframe(stability_df.round(4), width="stretch", hide_index=True)
     panel_close()
 
