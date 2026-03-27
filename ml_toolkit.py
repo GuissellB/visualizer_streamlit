@@ -832,6 +832,27 @@ class ModelEvaluator:
             "searcher": searcher,
         }
 
+    def _normalize_genetic_param_grid(self, param_grid: Dict[str, Any]) -> Dict[str, Any]:
+        """Convierte listas simples en espacios válidos para GASearchCV."""
+        from sklearn_genetic.space import Categorical
+
+        normalized = {}
+        for param_name, param_values in param_grid.items():
+            if hasattr(param_values, "sample"):
+                normalized[param_name] = param_values
+                continue
+
+            if isinstance(param_values, (list, tuple, np.ndarray, pd.Series)):
+                values = list(param_values)
+                if not values:
+                    raise ValueError(f"El parámetro '{param_name}' no puede tener una lista vacía.")
+                normalized[param_name] = Categorical(values)
+                continue
+
+            normalized[param_name] = Categorical([param_values])
+
+        return normalized
+
     def get_evolved_estimator(self, result: Dict[str, Any]):
         """Devuelve el estimador final de un resultado de búsqueda."""
         if "estimator" not in result:
@@ -889,7 +910,7 @@ class ModelEvaluator:
 
         for name, config in model_spaces.items():
             estimator = config["estimator"]
-            param_grid = config["param_grid"]
+            param_grid = self._normalize_genetic_param_grid(config["param_grid"])
 
             searcher = GASearchCV(
                 estimator=estimator,

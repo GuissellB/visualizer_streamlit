@@ -1177,48 +1177,45 @@ def is_genetic_search_available() -> bool:
         return False
 
 
-def build_best_model_search_grid(best_model_name: str) -> tuple[dict, list]:
+def build_best_model_search_grid(best_model_name: str, current_params: dict) -> tuple[dict, list]:
     param_grid = {}
     errors = []
-    defaults = MODEL_DEFAULT_PARAMS.get(best_model_name, {})
 
-    st.caption("Define listas separadas por comas. Si dejas un campo vacío, no se incluye en la búsqueda.")
+    st.caption("Los campos cargan los valores actuales del mejor modelo. Puedes agregar más opciones separadas por comas.")
 
     with st.expander("Grid de búsqueda", expanded=False):
         for param_key, config in SHARED_PARAM_SCHEMA.items():
-            if param_key not in defaults:
+            if param_key not in current_params:
                 continue
             raw_value = st.text_input(
                 f"{config['label']} (grid)",
-                value="",
+                value=str(current_params.get(param_key)),
                 key=f"search_shared_{best_model_name}_{param_key}",
-                placeholder=f"Ej: {defaults.get(param_key)}",
+                placeholder=f"Ej: {current_params.get(param_key)}",
                 help="Valores separados por comas.",
             )
-            if raw_value.strip():
-                try:
-                    values = parse_search_values(raw_value, config["type"])
-                    if values:
-                        param_grid[param_key] = values
-                except Exception:
-                    errors.append(f"Valores inválidos para {param_key}.")
+            try:
+                values = parse_search_values(raw_value, config["type"])
+                if values:
+                    param_grid[param_key] = values
+            except Exception:
+                errors.append(f"Valores inválidos para {param_key}.")
 
         for param_key, config in MODEL_PARAM_SCHEMA.get(best_model_name, {}).items():
             raw_value = st.text_input(
                 f"{config['label']} (grid)",
-                value="",
+                value=str(current_params.get(param_key, "")),
                 key=f"search_model_{best_model_name}_{param_key}",
-                placeholder="Ej: valor1, valor2",
+                placeholder=f"Ej: {current_params.get(param_key, '')}",
                 help="Valores separados por comas.",
             )
-            if raw_value.strip():
-                parse_type = config["type"] if config["type"] in {"int", "float"} else "text"
-                try:
-                    values = parse_search_values(raw_value, parse_type)
-                    if values:
-                        param_grid[param_key] = values
-                except Exception:
-                    errors.append(f"Valores inválidos para {param_key}.")
+            parse_type = config["type"] if config["type"] in {"int", "float"} else "text"
+            try:
+                values = parse_search_values(raw_value, parse_type)
+                if values:
+                    param_grid[param_key] = values
+            except Exception:
+                errors.append(f"Valores inválidos para {param_key}.")
 
     return param_grid, errors
 
@@ -1592,23 +1589,26 @@ elif page == "Parametrización del Modelo":
     if not genetic_available:
         st.caption("La búsqueda genética se habilita instalando `sklearn-genetic-opt`.")
 
-    search_grid, search_grid_errors = build_best_model_search_grid(best_model_name)
+    st.caption(
+        "Nota: el tuning hace cross-validation sobre entrenamiento y luego evalúa el mejor modelo en test, "
+        "por eso sus métricas pueden diferir del ranking principal."
+    )
+
+    search_grid, search_grid_errors = build_best_model_search_grid(
+        best_model_name,
+        configured_best_model.get_params(),
+    )
     if search_grid_errors:
         for error in search_grid_errors:
             st.error(error)
 
-    if search_grid:
-        st.caption(f"Parámetros incluidos en la búsqueda: {', '.join(search_grid.keys())}")
-    else:
-        st.info("Agrega al menos un parámetro con varios valores para ejecutar la búsqueda.")
+    st.caption(f"Parámetros incluidos en la búsqueda: {', '.join(search_grid.keys())}")
 
     run_tuning = st.button("Ejecutar búsqueda sobre el mejor modelo", use_container_width=True)
 
     if run_tuning:
         if search_grid_errors:
             st.error("Corrige los parámetros inválidos antes de ejecutar la búsqueda.")
-        elif not search_grid:
-            st.warning("Debes indicar al menos un parámetro para buscar.")
         else:
             with st.spinner("Buscando mejores hiperparámetros..."):
                 tuning_result = run_best_model_search(
