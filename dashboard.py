@@ -106,6 +106,22 @@ def parse_optional_value(raw_value: str, value_type: str):
     return raw_value
 
 
+def parse_search_values(raw_value: str, value_type: str):
+    values = [item.strip() for item in str(raw_value).split(",") if item.strip()]
+    if not values:
+        return []
+
+    parsed = []
+    for value in values:
+        if value_type == "int":
+            parsed.append(int(value))
+        elif value_type == "float":
+            parsed.append(float(value))
+        else:
+            parsed.append(normalize_param_value(value))
+    return parsed
+
+
 def normalize_param_value(value):
     if value == "None":
         return None
@@ -1152,6 +1168,135 @@ def get_real_feature_columns(csv_name: str, target: str) -> list:
     df_local = load_model_df(csv_name)
     return [c for c in df_local.columns if c != target]
 
+
+def is_genetic_search_available() -> bool:
+    try:
+        import sklearn_genetic  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def build_best_model_search_grid(best_model_name: str) -> tuple[dict, list]:
+    param_grid = {}
+    errors = []
+    defaults = MODEL_DEFAULT_PARAMS.get(best_model_name, {})
+
+    st.caption("Define listas separadas por comas. Si dejas un campo vacío, no se incluye en la búsqueda.")
+
+    with st.expander("Grid de búsqueda", expanded=False):
+        for param_key, config in SHARED_PARAM_SCHEMA.items():
+            if param_key not in defaults:
+                continue
+            raw_value = st.text_input(
+                f"{config['label']} (grid)",
+                value="",
+                key=f"search_shared_{best_model_name}_{param_key}",
+                placeholder=f"Ej: {defaults.get(param_key)}",
+                help="Valores separados por comas.",
+            )
+            if raw_value.strip():
+                try:
+                    values = parse_search_values(raw_value, config["type"])
+                    if values:
+                        param_grid[param_key] = values
+                except Exception:
+                    errors.append(f"Valores inválidos para {param_key}.")
+
+        for param_key, config in MODEL_PARAM_SCHEMA.get(best_model_name, {}).items():
+            raw_value = st.text_input(
+                f"{config['label']} (grid)",
+                value="",
+                key=f"search_model_{best_model_name}_{param_key}",
+                placeholder="Ej: valor1, valor2",
+                help="Valores separados por comas.",
+            )
+            if raw_value.strip():
+                parse_type = config["type"] if config["type"] in {"int", "float"} else "text"
+                try:
+                    values = parse_search_values(raw_value, parse_type)
+                    if values:
+                        param_grid[param_key] = values
+                except Exception:
+                    errors.append(f"Valores inválidos para {param_key}.")
+
+    return param_grid, errors
+
+
+def run_best_model_search(
+    csv_name: str,
+    target: str,
+    best_model_name: str,
+    seed: int,
+    train_size: float,
+    balance_method: str,
+    shared_param_overrides: dict,
+    model_param_overrides: dict,
+    search_method: str,
+    search_cv: int,
+    scoring: str,
+    param_grid: dict,
+):
+    df_local = load_model_df(csv_name)
+    estandarizar = best_model_name in ["Regresión Logística", "SVM"]
+    balance_config = get_runner_balance_config(balance_method)
+
+    model = crear_modelo_configurable(
+        best_model_name,
+        random_state=seed,
+        shared_overrides=shared_param_overrides,
+        model_overrides=model_param_overrides.get(best_model_name, {}),
+    )
+
+    prep = DataPreparer(
+        train_size=train_size,
+        random_state=seed,
+        scale_X=estandarizar,
+    )
+
+    runner = SupervisedRunner(
+        df=df_local,
+        target=target,
+        model=model,
+        task="classification",
+        preparer=prep,
+        pos_label=1,
+        class_weight=balance_config["class_weight"],
+        sampling_method=balance_config["sampling_method"],
+    )
+
+    evaluator = runner.build_evaluator(scoring=scoring, cv=search_cv)
+    search_input = {
+        best_model_name: {
+            "estimator": runner.get_model_for_current_split(),
+            "param_grid": param_grid,
+        }
+    }
+
+    if search_method == "Genetic":
+        search_results = evaluator.genetic_search(search_input)
+    else:
+        search_results = evaluator.exhaustive_search(search_input)
+
+    result = search_results[best_model_name]
+    tuned_model = result["estimator"]
+    y_pred = tuned_model.predict(evaluator.X_test)
+    y_score = get_positive_score(tuned_model, evaluator.X_test)
+
+    metrics = {
+        "Accuracy": float(accuracy_score(evaluator.y_test, y_pred)),
+        "Precision": float(precision_score(evaluator.y_test, y_pred, pos_label=1, zero_division=0)),
+        "Recall": float(recall_score(evaluator.y_test, y_pred, pos_label=1, zero_division=0)),
+        "F1": float(f1_score(evaluator.y_test, y_pred, pos_label=1, zero_division=0)),
+        "ROC_AUC": float(roc_auc_score(evaluator.y_test, y_score)) if y_score is not None else None,
+    }
+
+    return {
+        "best_params": result["best_params"],
+        "best_score": result["best_score"],
+        "metrics": metrics,
+    }
+
 real_metrics = best_model_payload["metrics"]
 real_confusion = best_model_payload["confusion"]
 real_roc_df = best_model_payload["roc_df"]
@@ -1426,6 +1571,84 @@ elif page == "Parametrización del Modelo":
 
     panel_open("Hiperparámetros reales del modelo ganador", "Parámetros obtenidos directamente desde get_params().")
     st.dataframe(best_model_params_df, width="stretch", hide_index=True)
+    panel_close()
+
+    panel_open("Búsqueda de hiperparámetros", "Optimiza el mejor modelo actual bajo demanda.")
+    genetic_available = is_genetic_search_available()
+    tuning_method_options = ["Exhaustive"] + (["Genetic"] if genetic_available else [])
+
+    tune_col_1, tune_col_2, tune_col_3 = st.columns(3, gap="medium")
+    with tune_col_1:
+        tuning_method = st.selectbox("Método de búsqueda", options=tuning_method_options, index=0)
+    with tune_col_2:
+        tuning_cv = st.slider("Folds para búsqueda", min_value=3, max_value=10, value=5)
+    with tune_col_3:
+        tuning_scoring = st.selectbox(
+            "Scoring",
+            options=["f1", "roc_auc", "accuracy"],
+            index=0,
+        )
+
+    if not genetic_available:
+        st.caption("La búsqueda genética se habilita instalando `sklearn-genetic-opt`.")
+
+    search_grid, search_grid_errors = build_best_model_search_grid(best_model_name)
+    if search_grid_errors:
+        for error in search_grid_errors:
+            st.error(error)
+
+    if search_grid:
+        st.caption(f"Parámetros incluidos en la búsqueda: {', '.join(search_grid.keys())}")
+    else:
+        st.info("Agrega al menos un parámetro con varios valores para ejecutar la búsqueda.")
+
+    run_tuning = st.button("Ejecutar búsqueda sobre el mejor modelo", use_container_width=True)
+
+    if run_tuning:
+        if search_grid_errors:
+            st.error("Corrige los parámetros inválidos antes de ejecutar la búsqueda.")
+        elif not search_grid:
+            st.warning("Debes indicar al menos un parámetro para buscar.")
+        else:
+            with st.spinner("Buscando mejores hiperparámetros..."):
+                tuning_result = run_best_model_search(
+                    DATA_PATH,
+                    TARGET_COL,
+                    best_model_name,
+                    int(selected_random_state),
+                    selected_train_size,
+                    selected_balance_method,
+                    shared_param_overrides,
+                    model_param_overrides,
+                    tuning_method,
+                    tuning_cv,
+                    tuning_scoring,
+                    search_grid,
+                )
+
+            best_score_value = tuning_result["best_score"]
+            tuned_metrics = tuning_result["metrics"]
+            tuned_params_df = pd.DataFrame(
+                [
+                    {"Parámetro": key, "Valor": str(value)}
+                    for key, value in tuning_result["best_params"].items()
+                ]
+            )
+
+            tuning_metrics_cols = st.columns(5, gap="medium")
+            tuning_cards = [
+                ("Best CV Score", f"{best_score_value:.4f}", f"Scoring: {tuning_scoring}", "#2563eb"),
+                ("Accuracy", f"{tuned_metrics['Accuracy']:.4f}", "Conjunto de prueba", "#7c3aed"),
+                ("Precision", f"{tuned_metrics['Precision']:.4f}", "Conjunto de prueba", "#10b981"),
+                ("Recall", f"{tuned_metrics['Recall']:.4f}", "Conjunto de prueba", "#06b6d4"),
+                ("F1", f"{tuned_metrics['F1']:.4f}", "Conjunto de prueba", "#f59e0b"),
+            ]
+            for col, card in zip(tuning_metrics_cols, tuning_cards):
+                with col:
+                    metric_card(*card)
+
+            st.markdown("#### Mejores parámetros encontrados")
+            st.dataframe(tuned_params_df, width="stretch", hide_index=True)
     panel_close()
 
 # =========================

@@ -1,10 +1,16 @@
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Any
 
 from sklearn.base import BaseEstimator, clone
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold, TimeSeriesSplit
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    KFold,
+    TimeSeriesSplit,
+    GridSearchCV,
+)
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     confusion_matrix,
@@ -39,6 +45,7 @@ def get_positive_score(model, X):
     if hasattr(model, "decision_function"):
         return model.decision_function(X)
     return None
+
 
 def m_accuracy_error() -> Callable:
     def _m(y, yp, model=None, X=None):
@@ -429,6 +436,21 @@ class SupervisedRunner:
     def _use_stratify(self) -> bool:
         return self.task == "classification"
 
+    def get_cv_strategy(self, n_splits: int = 10, shuffle: bool = True):
+        if self.task == "classification":
+            return StratifiedKFold(
+                n_splits=n_splits,
+                shuffle=shuffle,
+                random_state=self.preparer.random_state,
+            )
+        if self.task == "regression":
+            return KFold(
+                n_splits=n_splits,
+                shuffle=shuffle,
+                random_state=self.preparer.random_state,
+            )
+        raise ValueError("task debe ser 'classification' o 'regression'")
+
     def _prepare(self):
         self.X_train, self.X_test, self.y_train, self.y_test, self.feature_names = self.preparer.split(
             df=self.df,
@@ -461,6 +483,10 @@ class SupervisedRunner:
             out.update(fn(self.y_test, yp, model=self.model, X=self.X_test))
         return out
 
+    def build_evaluator(self, scoring: Optional[str] = None, cv: int = 5):
+        """Construye un ModelEvaluator reutilizando el split actual del runner."""
+        return ModelEvaluator.from_runner(self, scoring=scoring, cv=cv)
+
     def evaluate_cv(self, n_splits: int = 10, shuffle: bool = True) -> Dict[str, object]:
         """KFold/StratifiedKFold con métricas mean/std."""
         X, y, cols = self.preparer.build_xy(
@@ -469,14 +495,7 @@ class SupervisedRunner:
             features=self.features,
             y_transform=self._y_transform,
         )
-
-        if self.task == "classification":
-            # En clasificación la validación cruzada usa folds estratificados
-            # para conservar la proporción de clases en cada partición.
-            cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
-        else:
-            # En regresión usa KFold estándar porque no hay clases que estratificar.
-            cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=self.preparer.random_state)
+        cv = self.get_cv_strategy(n_splits=n_splits, shuffle=shuffle)
 
         fold_metrics: List[Dict[str, object]] = []
         for tr, te in cv.split(X, y):
@@ -720,7 +739,178 @@ class TimeSeriesRunner:
 
 
 # =============================================================================
-# 4) NO SUPERVISADO (solo lógica; SIN plots)
+# 4) BÚSQUEDA DE HIPERPARÁMETROS
+# =============================================================================
+class ModelEvaluator:
+    """Búsqueda de hiperparámetros sobre un split ya preparado.
+
+    Salida estándar por modelo:
+    {
+        "NombreModelo": {
+            "estimator": mejor_modelo_entrenado,
+            "best_params": {...},
+            "best_score": float,
+            "searcher": objeto_search_cv,
+        }
+    }
+    """
+
+    def __init__(
+        self,
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        task: str = "regression",
+        scoring: Optional[str] = None,
+        cv: int = 5,
+        random_state: Optional[int] = 42,
+    ):
+        self.X_train = X_train
+        self.X_test = X_test
+        self.y_train = y_train
+        self.y_test = y_test
+        self.task = task.lower()
+        self.scoring = scoring or self._default_scoring()
+        self.cv = cv
+        self.random_state = random_state
+        self.runner = None
+
+    @classmethod
+    def from_runner(
+        cls,
+        runner: SupervisedRunner,
+        scoring: Optional[str] = None,
+        cv: int = 5,
+    ):
+        """Crea un evaluador a partir de un SupervisedRunner ya configurado."""
+        if not runner._prepared:
+            runner._prepare()
+        evaluator = cls(
+            X_train=runner.X_train,
+            X_test=runner.X_test,
+            y_train=runner.y_train,
+            y_test=runner.y_test,
+            task=runner.task,
+            scoring=scoring,
+            cv=cv,
+            random_state=runner.preparer.random_state,
+        )
+        evaluator.runner = runner
+        return evaluator
+
+    def _default_scoring(self) -> str:
+        if self.task == "classification":
+            return "f1"
+        if self.task == "regression":
+            return "neg_mean_squared_error"
+        raise ValueError("task debe ser 'classification' o 'regression'")
+
+    def _default_cv(self):
+        if self.runner is not None:
+            return self.runner.get_cv_strategy(n_splits=self.cv, shuffle=True)
+
+        if self.task == "classification":
+            return StratifiedKFold(
+                n_splits=self.cv,
+                shuffle=True,
+                random_state=self.random_state,
+            )
+        if self.task == "regression":
+            return KFold(
+                n_splits=self.cv,
+                shuffle=True,
+                random_state=self.random_state,
+            )
+        raise ValueError("task debe ser 'classification' o 'regression'")
+
+    def _normalize_search_result(self, searcher) -> Dict[str, Any]:
+        return {
+            "estimator": searcher.best_estimator_,
+            "best_params": dict(searcher.best_params_),
+            "best_score": float(searcher.best_score_),
+            "searcher": searcher,
+        }
+
+    def get_evolved_estimator(self, result: Dict[str, Any]):
+        """Devuelve el estimador final de un resultado de búsqueda."""
+        if "estimator" not in result:
+            raise KeyError("El resultado no contiene la llave 'estimator'.")
+        return result["estimator"]
+
+    def exhaustive_search(self, model_spaces: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Prueba todas las combinaciones del grid con GridSearchCV.
+
+        Formato esperado:
+        {
+            "RandomForest": {
+                "estimator": RandomForestRegressor(...),
+                "param_grid": {"n_estimators": [100, 200], "max_depth": [5, 10]},
+            }
+        }
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        cv_strategy = self._default_cv()
+
+        for name, config in model_spaces.items():
+            estimator = config["estimator"]
+            param_grid = config["param_grid"]
+
+            searcher = GridSearchCV(
+                estimator=estimator,
+                param_grid=param_grid,
+                scoring=self.scoring,
+                cv=cv_strategy,
+                n_jobs=-1,
+                refit=True,
+            )
+            searcher.fit(self.X_train, self.y_train)
+            results[name] = self._normalize_search_result(searcher)
+
+        return results
+
+    def genetic_search(
+        self,
+        model_spaces: Dict[str, Dict[str, Any]],
+        population_size: int = 10,
+        generations: int = 8,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Búsqueda evolutiva opcional con sklearn-genetic-opt."""
+        try:
+            from sklearn_genetic import GASearchCV
+        except ImportError as exc:
+            raise ImportError(
+                "genetic_search requiere instalar 'sklearn-genetic-opt'. "
+                "Puedes usar exhaustive_search sin dependencias extra."
+            ) from exc
+
+        results: Dict[str, Dict[str, Any]] = {}
+        cv_strategy = self._default_cv()
+
+        for name, config in model_spaces.items():
+            estimator = config["estimator"]
+            param_grid = config["param_grid"]
+
+            searcher = GASearchCV(
+                estimator=estimator,
+                cv=cv_strategy,
+                scoring=self.scoring,
+                population_size=population_size,
+                generations=generations,
+                n_jobs=-1,
+                verbose=False,
+                criteria="max",
+                algorithm="eaMuPlusLambda",
+                param_grid=param_grid,
+            )
+            searcher.fit(self.X_train, self.y_train)
+            results[name] = self._normalize_search_result(searcher)
+
+        return results
+
+
+# =============================================================================
+# 5) NO SUPERVISADO (solo lógica; SIN plots)
 # =============================================================================
 class UnsupervisedRunner:
     """Embeddings / clustering, sin visualización.
