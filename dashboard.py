@@ -201,6 +201,14 @@ def build_model_params(model_name: str, random_state: int, shared_overrides: dic
     compatible_specific = {k: v for k, v in model_overrides.items() if v is not None}
     params.update(compatible_shared)
     params.update(compatible_specific)
+
+    # Algunos hiperparámetros compartidos usan convenciones distintas según el estimador.
+    # LightGBM acepta max_depth=-1 como "sin límite"; otros modelos usan otro valor equivalente.
+    if model_name == "Random Forest" and params.get("max_depth") == -1:
+        params["max_depth"] = None
+    if model_name == "XGBoost" and params.get("max_depth") == -1:
+        params["max_depth"] = 0
+
     params["random_state"] = random_state
     return params
 
@@ -283,51 +291,75 @@ def get_balance_display(balance_method: str, model=None) -> dict:
     return display_map.get(balance_method, display_map["none"])
 
 
-def render_text_param_input(widget_key: str, param_key: str, config: dict):
+def render_text_param_input(widget_key: str, param_key: str, config: dict, value: str = ""):
     return st.text_input(
         config["label"],
-        value="",
+        value=value,
         key=widget_key,
         placeholder="Default",
         help=config.get("help", f"Déjalo vacío para usar el valor por defecto de {param_key}."),
     )
 
 
-def collect_shared_param_overrides() -> dict:
+def collect_shared_param_overrides(current_overrides: dict | None = None) -> dict:
+    current_overrides = current_overrides or {}
     overrides = {}
     with st.expander("Hiperparámetros compartidos", expanded=False):
         st.caption("Déjalos vacíos para usar los valores por defecto.")
+        st.caption("Nota: algunos valores compartidos pueden adaptarse según el modelo. Ejemplo: `max_depth=-1` se interpreta distinto entre LightGBM y Random Forest.")
         for param_key, config in SHARED_PARAM_SCHEMA.items():
-            raw_value = render_text_param_input(f"shared_{param_key}", param_key, config)
+            current_value = current_overrides.get(param_key)
+            raw_value = render_text_param_input(
+                f"shared_{param_key}",
+                param_key,
+                config,
+                value="" if current_value is None else str(current_value),
+            )
             overrides[param_key] = parse_optional_value(raw_value, config["type"])
     return overrides
 
 
-def collect_model_param_overrides() -> dict:
+def collect_model_param_overrides(current_overrides: dict | None = None) -> dict:
+    current_overrides = current_overrides or {}
     overrides = {}
     with st.expander("Hiperparámetros por modelo", expanded=False):
         st.caption("Solo se aplican al modelo correspondiente. Si no llenas el campo, se conserva el default.")
         for model_name, schema in MODEL_PARAM_SCHEMA.items():
             with st.expander(model_name, expanded=False):
                 model_values = {}
+                current_model_values = current_overrides.get(model_name, {})
                 for param_key, config in schema.items():
                     widget_key = f"{model_name}_{param_key}"
+                    current_value = current_model_values.get(param_key)
                     if config["type"] == "select":
+                        options = ["Default"] + config["options"]
+                        selected_value = "Default" if current_value is None else str(current_value)
+                        selected_index = options.index(selected_value) if selected_value in options else 0
                         value = st.selectbox(
                             config["label"],
-                            options=["Default"] + config["options"],
+                            options=options,
                             key=widget_key,
+                            index=selected_index,
                         )
                         model_values[param_key] = None if value == "Default" else normalize_param_value(value)
                     elif config["type"] == "select_or_text":
+                        options = ["Default"] + config["options"]
+                        selected_value = "Default" if current_value is None else str(current_value)
+                        selected_index = options.index(selected_value) if selected_value in options else 0
                         value = st.selectbox(
                             config["label"],
-                            options=["Default"] + config["options"],
+                            options=options,
                             key=widget_key,
+                            index=selected_index,
                         )
                         model_values[param_key] = None if value == "Default" else value
                     else:
-                        raw_value = render_text_param_input(widget_key, param_key, config)
+                        raw_value = render_text_param_input(
+                            widget_key,
+                            param_key,
+                            config,
+                            value="" if current_value is None else str(current_value),
+                        )
                         model_values[param_key] = parse_optional_value(raw_value, config["type"])
                 overrides[model_name] = model_values
     return overrides
@@ -1069,6 +1101,23 @@ df_eda, eda_summary = load_eda_data(DATA_PATH)
 
 df_model_base = load_model_df(DATA_PATH)
 
+if "applied_balance_method" not in st.session_state:
+    st.session_state["applied_balance_method"] = "none"
+if "applied_use_cross_validation" not in st.session_state:
+    st.session_state["applied_use_cross_validation"] = True
+if "applied_n_splits" not in st.session_state:
+    st.session_state["applied_n_splits"] = N_SPLITS
+if "applied_selected_criterion" not in st.session_state:
+    st.session_state["applied_selected_criterion"] = get_default_selection_criterion(True)
+if "applied_random_state" not in st.session_state:
+    st.session_state["applied_random_state"] = RANDOM_STATE
+if "applied_train_size" not in st.session_state:
+    st.session_state["applied_train_size"] = 0.75
+if "applied_shared_param_overrides" not in st.session_state:
+    st.session_state["applied_shared_param_overrides"] = {}
+if "applied_model_param_overrides" not in st.session_state:
+    st.session_state["applied_model_param_overrides"] = {}
+
 with st.sidebar:
     # La barra lateral solo controla navegación y configuración del modelado.
     st.markdown("## 🛡️ Phishing Detection")
@@ -1084,26 +1133,73 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.markdown("---")
-    selected_balance_method = st.selectbox(
-        "Método de balanceo",
-        options=list(BALANCE_METHOD_OPTIONS.keys()),
-        format_func=lambda x: BALANCE_METHOD_OPTIONS[x],
-        index=0,
-    )
-    use_cross_validation = st.toggle("Usar cross-validation", value=True)
-    selected_n_splits = st.slider("Folds CV", min_value=3, max_value=10, value=N_SPLITS) if use_cross_validation else 0
-    criterion_options = get_available_criteria(use_cross_validation)
-    selected_criterion = st.selectbox(
-        "Criterio para mejor modelo",
-        options=list(criterion_options.keys()),
-        format_func=lambda x: criterion_options[x],
-        index=list(criterion_options.keys()).index(get_default_selection_criterion(use_cross_validation)),
-    )
-    with st.expander("Configuración experimental", expanded=False):
-        selected_random_state = st.number_input("random_state", min_value=0, value=RANDOM_STATE, step=1)
-        selected_train_size = st.slider("train_size", min_value=0.5, max_value=0.9, value=0.75, step=0.05)
-    shared_param_overrides = collect_shared_param_overrides()
-    model_param_overrides = collect_model_param_overrides()
+    with st.form("sidebar_model_config_form"):
+        selected_balance_method = st.selectbox(
+            "Método de balanceo",
+            options=list(BALANCE_METHOD_OPTIONS.keys()),
+            format_func=lambda x: BALANCE_METHOD_OPTIONS[x],
+            index=list(BALANCE_METHOD_OPTIONS.keys()).index(st.session_state["applied_balance_method"]),
+        )
+        use_cross_validation = st.toggle(
+            "Usar cross-validation",
+            value=st.session_state["applied_use_cross_validation"],
+        )
+        selected_n_splits = (
+            st.slider(
+                "Folds CV",
+                min_value=3,
+                max_value=10,
+                value=st.session_state["applied_n_splits"],
+            )
+            if use_cross_validation
+            else 0
+        )
+        criterion_options = get_available_criteria(use_cross_validation)
+        default_criterion = st.session_state["applied_selected_criterion"]
+        if default_criterion not in criterion_options:
+            default_criterion = get_default_selection_criterion(use_cross_validation)
+        selected_criterion = st.selectbox(
+            "Criterio para mejor modelo",
+            options=list(criterion_options.keys()),
+            format_func=lambda x: criterion_options[x],
+            index=list(criterion_options.keys()).index(default_criterion),
+        )
+        with st.expander("Configuración experimental", expanded=False):
+            selected_random_state = st.number_input(
+                "random_state",
+                min_value=0,
+                value=st.session_state["applied_random_state"],
+                step=1,
+            )
+            selected_train_size = st.slider(
+                "train_size",
+                min_value=0.5,
+                max_value=0.9,
+                value=float(st.session_state["applied_train_size"]),
+                step=0.05,
+            )
+        shared_param_overrides = collect_shared_param_overrides(st.session_state["applied_shared_param_overrides"])
+        model_param_overrides = collect_model_param_overrides(st.session_state["applied_model_param_overrides"])
+        apply_sidebar_config = st.form_submit_button("Aplicar configuración", use_container_width=True)
+
+    if apply_sidebar_config:
+        st.session_state["applied_balance_method"] = selected_balance_method
+        st.session_state["applied_use_cross_validation"] = use_cross_validation
+        st.session_state["applied_n_splits"] = selected_n_splits
+        st.session_state["applied_selected_criterion"] = selected_criterion
+        st.session_state["applied_random_state"] = int(selected_random_state)
+        st.session_state["applied_train_size"] = float(selected_train_size)
+        st.session_state["applied_shared_param_overrides"] = shared_param_overrides
+        st.session_state["applied_model_param_overrides"] = model_param_overrides
+
+    selected_balance_method = st.session_state["applied_balance_method"]
+    use_cross_validation = st.session_state["applied_use_cross_validation"]
+    selected_n_splits = st.session_state["applied_n_splits"] if use_cross_validation else 0
+    selected_criterion = st.session_state["applied_selected_criterion"]
+    selected_random_state = st.session_state["applied_random_state"]
+    selected_train_size = st.session_state["applied_train_size"]
+    shared_param_overrides = st.session_state["applied_shared_param_overrides"]
+    model_param_overrides = st.session_state["applied_model_param_overrides"]
     st.markdown(
         f"""
         <div class="status-box">
@@ -1619,37 +1715,38 @@ elif page == "Parametrización del Modelo":
     genetic_available = is_genetic_search_available()
     tuning_method_options = ["Exhaustive"] + (["Genetic"] if genetic_available else [])
 
-    tune_col_1, tune_col_2, tune_col_3 = st.columns(3, gap="medium")
-    with tune_col_1:
-        tuning_method = st.selectbox("Método de búsqueda", options=tuning_method_options, index=0)
-    with tune_col_2:
-        tuning_cv = st.slider("Folds para búsqueda", min_value=3, max_value=10, value=5)
-    with tune_col_3:
-        tuning_scoring = st.selectbox(
-            "Scoring",
-            options=["f1", "roc_auc", "accuracy"],
-            index=0,
+    with st.form("best_model_tuning_form"):
+        tune_col_1, tune_col_2, tune_col_3 = st.columns(3, gap="medium")
+        with tune_col_1:
+            tuning_method = st.selectbox("Método de búsqueda", options=tuning_method_options, index=0)
+        with tune_col_2:
+            tuning_cv = st.slider("Folds para búsqueda", min_value=3, max_value=10, value=5)
+        with tune_col_3:
+            tuning_scoring = st.selectbox(
+                "Scoring",
+                options=["f1", "roc_auc", "accuracy"],
+                index=0,
+            )
+
+        if not genetic_available:
+            st.caption("La búsqueda genética se habilita instalando `sklearn-genetic-opt`.")
+
+        st.caption(
+            "Nota: el tuning hace cross-validation sobre entrenamiento y luego evalúa el mejor modelo en test, "
+            "por eso sus métricas pueden diferir del ranking principal."
         )
 
-    if not genetic_available:
-        st.caption("La búsqueda genética se habilita instalando `sklearn-genetic-opt`.")
+        search_grid, search_grid_errors = build_best_model_search_grid(
+            best_model_name,
+            configured_best_model.get_params(),
+        )
+        if search_grid_errors:
+            for error in search_grid_errors:
+                st.error(error)
 
-    st.caption(
-        "Nota: el tuning hace cross-validation sobre entrenamiento y luego evalúa el mejor modelo en test, "
-        "por eso sus métricas pueden diferir del ranking principal."
-    )
+        st.caption(f"Parámetros incluidos en la búsqueda: {', '.join(search_grid.keys())}")
 
-    search_grid, search_grid_errors = build_best_model_search_grid(
-        best_model_name,
-        configured_best_model.get_params(),
-    )
-    if search_grid_errors:
-        for error in search_grid_errors:
-            st.error(error)
-
-    st.caption(f"Parámetros incluidos en la búsqueda: {', '.join(search_grid.keys())}")
-
-    run_tuning = st.button("Ejecutar búsqueda sobre el mejor modelo", use_container_width=True)
+        run_tuning = st.form_submit_button("Ejecutar búsqueda sobre el mejor modelo", use_container_width=True)
 
     if run_tuning:
         if search_grid_errors:
