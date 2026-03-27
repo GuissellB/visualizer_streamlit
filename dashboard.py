@@ -33,6 +33,8 @@ from app_config import (
     RANDOM_STATE,
     SEMILLAS,
     TARGET_COL,
+    TUNING_FLOAT_FACTORS,
+    TUNING_INT_STEPS,
 )
 from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner, get_positive_score
 from model_config import MODEL_DEFAULT_PARAMS, MODEL_PARAM_SCHEMA, SHARED_PARAM_SCHEMA
@@ -120,6 +122,47 @@ def parse_search_values(raw_value: str, value_type: str):
         else:
             parsed.append(normalize_param_value(value))
     return parsed
+
+
+def get_default_search_text(param_key: str, current_value, value_type: str) -> str:
+    if current_value is None or current_value == "":
+        return ""
+
+    if value_type == "int":
+        value = int(current_value)
+        if param_key == "max_iter" or TUNING_INT_STEPS.get(param_key) is None:
+            options = sorted({max(50, value // 2), value, value * 2})
+        elif param_key == "max_depth":
+            if value <= 0:
+                options = [value]
+            else:
+                step = TUNING_INT_STEPS.get(param_key, 1)
+                options = sorted({max(1, value - step), value, value + step})
+        else:
+            step = TUNING_INT_STEPS.get(param_key, 1)
+            min_value = 10 if param_key == "n_estimators" else 2 if param_key == "num_leaves" else 1
+            options = sorted({max(min_value, value - step), value, value + step})
+        return ", ".join(str(option) for option in options)
+
+    if value_type == "float":
+        value = float(current_value)
+        if 0 < value <= 1:
+            factors = TUNING_FLOAT_FACTORS.get("default_fractional", (0.8, 1.0, 1.2))
+            options = sorted({
+                round(max(0.01, value * factors[0]), 4),
+                round(value * factors[1], 4),
+                round(min(1.0, value * factors[2]), 4),
+            })
+        else:
+            factors = TUNING_FLOAT_FACTORS.get("default_continuous", (0.5, 1.0, 1.5))
+            options = sorted({
+                round(max(0.0001, value * factors[0]), 4),
+                round(value * factors[1], 4),
+                round(value * factors[2], 4),
+            })
+        return ", ".join(str(option) for option in options)
+
+    return str(current_value)
 
 
 def normalize_param_value(value):
@@ -1181,17 +1224,18 @@ def build_best_model_search_grid(best_model_name: str, current_params: dict) -> 
     param_grid = {}
     errors = []
 
-    st.caption("Los campos cargan los valores actuales del mejor modelo. Puedes agregar más opciones separadas por comas.")
+    st.caption("Los campos cargan un mini rango alrededor del valor actual del mejor modelo. Puedes editarlo o agregar más opciones separadas por comas.")
 
     with st.expander("Grid de búsqueda", expanded=False):
         for param_key, config in SHARED_PARAM_SCHEMA.items():
             if param_key not in current_params:
                 continue
+            default_text = get_default_search_text(param_key, current_params.get(param_key), config["type"])
             raw_value = st.text_input(
                 f"{config['label']} (grid)",
-                value=str(current_params.get(param_key)),
+                value=default_text,
                 key=f"search_shared_{best_model_name}_{param_key}",
-                placeholder=f"Ej: {current_params.get(param_key)}",
+                placeholder=f"Ej: {default_text}",
                 help="Valores separados por comas.",
             )
             try:
@@ -1202,14 +1246,15 @@ def build_best_model_search_grid(best_model_name: str, current_params: dict) -> 
                 errors.append(f"Valores inválidos para {param_key}.")
 
         for param_key, config in MODEL_PARAM_SCHEMA.get(best_model_name, {}).items():
+            parse_type = config["type"] if config["type"] in {"int", "float"} else "text"
+            default_text = get_default_search_text(param_key, current_params.get(param_key, ""), parse_type)
             raw_value = st.text_input(
                 f"{config['label']} (grid)",
-                value=str(current_params.get(param_key, "")),
+                value=default_text,
                 key=f"search_model_{best_model_name}_{param_key}",
-                placeholder=f"Ej: {current_params.get(param_key, '')}",
+                placeholder=f"Ej: {default_text}",
                 help="Valores separados por comas.",
             )
-            parse_type = config["type"] if config["type"] in {"int", "float"} else "text"
             try:
                 values = parse_search_values(raw_value, parse_type)
                 if values:

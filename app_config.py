@@ -27,3 +27,15 @@ BALANCE_METHOD_OPTIONS = {
     "oversample": "Sobremuestreo (RandomOverSampler)",
     "smote_tomek": "SMOTE + Tomek",
 }
+
+TUNING_INT_STEPS = {
+    "n_estimators": 50,
+    "num_leaves": 10,
+    "max_depth": 2,
+    "max_iter": None,
+}
+
+TUNING_FLOAT_FACTORS = {
+    "default_fractional": (0.8, 1.0, 1.2),
+    "default_continuous": (0.5, 1.0, 1.5),
+}
