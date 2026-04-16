@@ -1,5 +1,6 @@
 altair==6.0.0
 attrs==25.4.0
+beautifulsoup4==4.14.2
 blinker==1.9.0
 cachetools==6.2.6
 certifi==2026.1.4
@@ -19,8 +20,10 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kiwisolver==1.4.9
 lightgbm==4.6.0
+lxml==6.0.2
 MarkupSafe==3.0.3
 matplotlib==3.10.8
+mlxtend==0.23.4
 narwhals==2.16.0
 numpy==2.4.2
 packaging==26.0
@@ -39,6 +42,7 @@ scikit-learn==1.8.0
 sklearn-genetic-opt
 scipy==1.17.0
 seaborn==0.13.2
+selenium==4.36.0
 six==1.17.0
 smmap==5.0.2
 streamlit==1.54.0

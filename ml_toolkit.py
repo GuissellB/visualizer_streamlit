@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any, Iterable, Sequence
 
 from sklearn.base import BaseEstimator, clone
 from sklearn.model_selection import (
@@ -1008,7 +1008,373 @@ class UnsupervisedRunner:
 
 
 # ==============================================================================
-# 5) EDAExplorer (solo data; SIN plots)
+# 6) REGLAS DE ASOCIACIÓN
+# ==============================================================================
+class AssociationRulesExplorer:
+    """Apriori + reglas de asociación sobre transacciones."""
+
+    def __init__(self, transactions: Optional[Sequence[Sequence[str]]] = None):
+        self.transactions = [list(tx) for tx in transactions] if transactions is not None else []
+        self.encoded_: Optional[pd.DataFrame] = None
+        self.itemsets_: Optional[pd.DataFrame] = None
+        self.rules_: Optional[pd.DataFrame] = None
+
+    @classmethod
+    def from_transaction_df(
+        cls,
+        df: pd.DataFrame,
+        transaction_col: str,
+        item_col: str,
+    ):
+        if transaction_col not in df.columns or item_col not in df.columns:
+            raise ValueError("Las columnas de transacción/item no existen en el DataFrame.")
+        grouped = (
+            df[[transaction_col, item_col]]
+            .dropna()
+            .groupby(transaction_col)[item_col]
+            .apply(list)
+            .tolist()
+        )
+        return cls(grouped)
+
+    def set_transactions(self, transactions: Sequence[Sequence[str]]):
+        self.transactions = [list(tx) for tx in transactions]
+        self.encoded_ = None
+        self.itemsets_ = None
+        self.rules_ = None
+        return self
+
+    def encode_transactions(self) -> pd.DataFrame:
+        if not self.transactions:
+            raise ValueError("No hay transacciones cargadas.")
+
+        from mlxtend.preprocessing import TransactionEncoder
+
+        encoder = TransactionEncoder()
+        matrix = encoder.fit(self.transactions).transform(self.transactions)
+        self.encoded_ = pd.DataFrame(matrix, columns=encoder.columns_)
+        return self.encoded_
+
+    def fit_itemsets(self, min_support: float = 0.01, use_colnames: bool = True) -> pd.DataFrame:
+        if self.encoded_ is None:
+            self.encode_transactions()
+
+        from mlxtend.frequent_patterns import apriori
+
+        self.itemsets_ = apriori(self.encoded_, min_support=min_support, use_colnames=use_colnames)
+        if not self.itemsets_.empty:
+            self.itemsets_["n_items"] = self.itemsets_["itemsets"].apply(len)
+            self.itemsets_ = self.itemsets_.sort_values("support", ascending=False).reset_index(drop=True)
+        return self.itemsets_
+
+    def fit_rules(
+        self,
+        min_support: float = 0.01,
+        metric: str = "confidence",
+        min_threshold: float = 0.5,
+    ) -> pd.DataFrame:
+        if self.itemsets_ is None:
+            self.fit_itemsets(min_support=min_support)
+
+        from mlxtend.frequent_patterns import association_rules
+
+        if self.itemsets_ is None or self.itemsets_.empty:
+            self.rules_ = pd.DataFrame()
+            return self.rules_
+
+        self.rules_ = association_rules(self.itemsets_, metric=metric, min_threshold=min_threshold)
+        if not self.rules_.empty:
+            self.rules_ = self.rules_.sort_values(metric, ascending=False).reset_index(drop=True)
+        return self.rules_
+
+    def top_items(self, top_n: int = 10) -> pd.Series:
+        if self.encoded_ is None:
+            self.encode_transactions()
+        return self.encoded_.mean(axis=0).sort_values(ascending=False).head(top_n)
+
+    def filter_rules_by_consequent(self, item: str) -> pd.DataFrame:
+        if self.rules_ is None:
+            raise ValueError("Primero debes ejecutar fit_rules().")
+        mask = self.rules_["consequents"].map(lambda x: item in x)
+        return self.rules_.loc[mask].copy()
+
+    def filter_rules_by_items(self, items: Iterable[str]) -> pd.DataFrame:
+        if self.rules_ is None:
+            raise ValueError("Primero debes ejecutar fit_rules().")
+        target_items = set(items)
+        rules = self.rules_.copy()
+        rules["items"] = rules[["antecedents", "consequents"]].apply(lambda row: set().union(*row), axis=1)
+        mask = rules["items"].map(lambda x: x.issubset(target_items))
+        return rules.loc[mask].copy()
+
+
+# ==============================================================================
+# 7) REDES NEURONALES
+# ==============================================================================
+class NeuralNetworkRunner(SupervisedRunner):
+    """Runner supervisado basado en MLPClassifier / MLPRegressor."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        target: str,
+        task: str,
+        features: Optional[List[str]] = None,
+        preparer: Optional[DataPreparer] = None,
+        metrics: Optional[List[Callable]] = None,
+        hidden_layer_sizes: Sequence[int] = (32, 16),
+        activation: str = "relu",
+        solver: str = "adam",
+        alpha: float = 0.0001,
+        batch_size: str | int = "auto",
+        learning_rate: str = "constant",
+        learning_rate_init: float = 0.001,
+        max_iter: int = 500,
+        early_stopping: bool = False,
+        random_state: Optional[int] = None,
+        encode_target: bool = False,
+        pos_label: int = 1,
+        class_weight: Optional[object] = None,
+        sampling_method: Optional[str] = None,
+    ):
+        from sklearn.neural_network import MLPClassifier, MLPRegressor
+
+        task_norm = task.lower()
+        model_kwargs = {
+            "hidden_layer_sizes": tuple(hidden_layer_sizes),
+            "activation": activation,
+            "solver": solver,
+            "alpha": alpha,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "learning_rate_init": learning_rate_init,
+            "max_iter": max_iter,
+            "early_stopping": early_stopping,
+            "random_state": random_state,
+        }
+
+        if preparer is None:
+            preparer = DataPreparer(random_state=random_state, scale_X=True)
+
+        if task_norm == "classification":
+            model = MLPClassifier(**model_kwargs)
+        elif task_norm == "regression":
+            model = MLPRegressor(**model_kwargs)
+        else:
+            raise ValueError("task debe ser 'classification' o 'regression'")
+
+        self.model_kwargs = model_kwargs
+        super().__init__(
+            df=df,
+            target=target,
+            model=model,
+            task=task_norm,
+            features=features,
+            preparer=preparer,
+            metrics=metrics,
+            encode_target=encode_target,
+            pos_label=pos_label,
+            class_weight=class_weight,
+            sampling_method=sampling_method,
+        )
+
+    def architecture(self) -> Dict[str, object]:
+        return {
+            "task": self.task,
+            "hidden_layer_sizes": self.model_kwargs["hidden_layer_sizes"],
+            "activation": self.model_kwargs["activation"],
+            "solver": self.model_kwargs["solver"],
+            "max_iter": self.model_kwargs["max_iter"],
+            "early_stopping": self.model_kwargs["early_stopping"],
+        }
+
+
+# ==============================================================================
+# 8) WEB MINING
+# ==============================================================================
+class WebMiningToolkit:
+    """Utilidades simples para scraping, parsing y extracción con regex."""
+
+    def __init__(
+        self,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = 15,
+        parser: str = "html.parser",
+    ):
+        self.headers = headers or {"User-Agent": "Mozilla/5.0"}
+        self.timeout = timeout
+        self.parser = parser
+        self.last_html_: Optional[str] = None
+        self.last_soup_ = None
+
+    def fetch(self, url: str):
+        import requests
+        from bs4 import BeautifulSoup
+
+        response = requests.get(url, headers=self.headers, timeout=self.timeout)
+        response.raise_for_status()
+        self.last_html_ = response.text
+        self.last_soup_ = BeautifulSoup(self.last_html_, self.parser)
+        return self.last_soup_
+
+    def fetch_dynamic(self, url: str, driver: str = "firefox", wait_seconds: float = 0):
+        from time import sleep
+        from bs4 import BeautifulSoup
+        from selenium import webdriver
+
+        browser_factory = {"firefox": webdriver.Firefox, "chrome": webdriver.Chrome}
+        if driver.lower() not in browser_factory:
+            raise ValueError("driver debe ser 'firefox' o 'chrome'.")
+
+        browser = browser_factory[driver.lower()]()
+        browser.get(url)
+        if wait_seconds > 0:
+            sleep(wait_seconds)
+
+        self.last_html_ = browser.page_source
+        self.last_soup_ = BeautifulSoup(self.last_html_, self.parser)
+        return browser
+
+    def extract_text(
+        self,
+        tag: Optional[str] = None,
+        attrs: Optional[Dict[str, str]] = None,
+        css_selector: Optional[str] = None,
+        limit: Optional[int] = None,
+        strip: bool = True,
+    ) -> List[str]:
+        soup = self._require_soup()
+        if css_selector:
+            elements = soup.select(css_selector)
+        else:
+            elements = soup.find_all(tag, attrs=attrs)
+        texts = [el.get_text(strip=strip) for el in elements]
+        return texts if limit is None else texts[:limit]
+
+    def extract_links(
+        self,
+        tag: str = "a",
+        attrs: Optional[Dict[str, str]] = None,
+        href_contains: Optional[str] = None,
+    ) -> List[str]:
+        soup = self._require_soup()
+        links = []
+        for el in soup.find_all(tag, attrs=attrs, href=True):
+            href = el["href"]
+            if href_contains and href_contains not in href:
+                continue
+            links.append(href)
+        return links
+
+    def extract_table(
+        self,
+        attrs: Optional[Dict[str, str]] = None,
+        index: int = 0,
+    ) -> pd.DataFrame:
+        soup = self._require_soup()
+        tables = soup.find_all("table", attrs=attrs)
+        if not tables:
+            raise ValueError("No se encontraron tablas con los criterios indicados.")
+        return pd.read_html(str(tables[index]))[0]
+
+    def regex_filter(
+        self,
+        texts: Sequence[str],
+        pattern: str,
+        flags: int = 0,
+    ) -> List[str]:
+        import re
+
+        return [text for text in texts if re.search(pattern, text, flags=flags)]
+
+    def regex_extract(
+        self,
+        texts: Sequence[str],
+        pattern: str,
+        flags: int = 0,
+        group_names: Optional[Sequence[str]] = None,
+    ) -> pd.DataFrame:
+        import re
+
+        rows: List[Dict[str, object]] = []
+        for text in texts:
+            match = re.search(pattern, text, flags=flags)
+            if not match:
+                continue
+
+            groups = match.groups()
+            if group_names and len(group_names) != len(groups):
+                raise ValueError("group_names debe tener el mismo tamaño que los grupos capturados.")
+
+            if group_names:
+                row = dict(zip(group_names, groups))
+            else:
+                row = {f"group_{i + 1}": value for i, value in enumerate(groups)}
+            row["text"] = text
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def extract_records(
+        self,
+        item_selector: str,
+        fields: Dict[str, Dict[str, object]],
+        source_url: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Extrae registros repetidos usando selectores CSS y reglas por campo.
+
+        fields ejemplo:
+        {
+            "titulo": {"selector": "h2 a", "attr": "text"},
+            "href": {"selector": "h2 a", "attr": "href"},
+            "precio": {"selector": ".price", "attr": "text", "default": None},
+        }
+        """
+        if source_url is not None:
+            self.fetch(source_url)
+
+        soup = self._require_soup()
+        items = soup.select(item_selector)
+        rows: List[Dict[str, object]] = []
+
+        for item in items:
+            row: Dict[str, object] = {}
+            for field_name, spec in fields.items():
+                selector = spec.get("selector")
+                attr = spec.get("attr", "text")
+                default = spec.get("default")
+                strip = bool(spec.get("strip", True))
+
+                if not selector:
+                    raise ValueError(f"El campo '{field_name}' requiere 'selector'.")
+
+                element = item.select_one(str(selector))
+                if element is None:
+                    row[field_name] = default
+                    continue
+
+                if attr == "text":
+                    row[field_name] = element.get_text(" ", strip=strip)
+                else:
+                    row[field_name] = element.get(str(attr), default)
+            rows.append(row)
+
+        return pd.DataFrame(rows)
+
+    def _request_text(self, url: str) -> str:
+        import requests
+
+        response = requests.get(url, headers=self.headers, timeout=self.timeout)
+        response.raise_for_status()
+        return response.text
+
+    def _require_soup(self):
+        if self.last_soup_ is None:
+            raise ValueError("Primero debes ejecutar fetch() o fetch_dynamic().")
+        return self.last_soup_
+
+
+# ==============================================================================
+# 9) EDAExplorer (solo data; SIN plots)
 # ==============================================================================
 class EDAExplorer:
     """Carga + limpieza + transformación. (Sin visualización)
@@ -1076,6 +1442,61 @@ class EDAExplorer:
             if col not in self._df.columns:
                 raise ValueError(f"'{col}' no existe en el DataFrame.")
             self._df[col] = pd.to_numeric(self._df[col], errors="coerce")
+        return self
+
+    def limpiar_texto(
+        self,
+        columnas,
+        strip: bool = True,
+        lower: bool = False,
+        remove_quotes: bool = False,
+        normalize_spaces: bool = True,
+    ):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        for col in columnas:
+            if col not in self._df.columns:
+                raise ValueError(f"'{col}' no existe en el DataFrame.")
+            serie = self._df[col].astype("string")
+            if remove_quotes:
+                serie = serie.str.replace('"', "", regex=False).str.replace("'", "", regex=False)
+            if normalize_spaces:
+                serie = serie.str.replace(r"\s+", " ", regex=True)
+            if strip:
+                serie = serie.str.strip()
+            if lower:
+                serie = serie.str.lower()
+            self._df[col] = serie
+        return self
+
+    def reemplazar_regex(self, columnas, pattern: str, repl: str = ""):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        for col in columnas:
+            if col not in self._df.columns:
+                raise ValueError(f"'{col}' no existe en el DataFrame.")
+            self._df[col] = self._df[col].astype("string").str.replace(pattern, repl, regex=True)
+        return self
+
+    def extraer_numerico_desde_texto(
+        self,
+        columnas,
+        decimal: str = ".",
+        thousands: Optional[str] = ",",
+        keep_sign: bool = True,
+    ):
+        columnas = [columnas] if isinstance(columnas, str) else list(columnas)
+        for col in columnas:
+            if col not in self._df.columns:
+                raise ValueError(f"'{col}' no existe en el DataFrame.")
+
+            serie = self._df[col].astype("string").str.replace(r"\s+", "", regex=True)
+            if thousands:
+                serie = serie.str.replace(thousands, "", regex=False)
+            if decimal != ".":
+                serie = serie.str.replace(decimal, ".", regex=False)
+
+            pattern = r"[^0-9.\-+]" if keep_sign else r"[^0-9.]"
+            serie = serie.str.replace(pattern, "", regex=True)
+            self._df[col] = pd.to_numeric(serie, errors="coerce")
         return self
 
     def a_dummies(self, drop_first: bool = True):
