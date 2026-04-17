@@ -1,0 +1,16 @@
+﻿item,support_proxy
+storage_bucket=128gb,1.0
+ram_bucket=unknown,1.0
+keyword=core,0.8034188034188035
+rating_bucket=low,0.5213675213675214
+keyword=home,0.47863247863247865
+cpu_family=i5,0.4188034188034188
+price_segment=premium,0.3418803418803419
+price_segment=budget,0.3333333333333333
+price_segment=midrange,0.3247863247863248
+rating_bucket=medium,0.29914529914529914
+cpu_family=i7,0.27350427350427353
+keyword=geforce,0.24786324786324787
+brand=acer,0.21367521367521367
+keyword=acer,0.21367521367521367
+keyword=asus,0.1794871794871795

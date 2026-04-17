@@ -1,0 +1,6 @@
+﻿model_name,Accuracy,Error,Recall_Pos,Precision_Pos,F1_Pos,ROC_AUC_Pos
+NN_01_Shallow_ReLU_Adam,0.7333333333333333,0.2666666666666667,,,,
+NN_02_Deep_ReLU_Adam,0.6,0.4,,,,
+NN_03_Wide_Tanh_Adam,0.7,0.30000000000000004,,,,
+NN_04_Compact_Logistic_LBFGS,0.7,0.30000000000000004,,,,
+NN_05_Tanh_SGD_MomentumLike,0.3,0.7,,,,

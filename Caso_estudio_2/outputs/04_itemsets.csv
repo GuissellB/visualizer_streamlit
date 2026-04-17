@@ -1,0 +1,620 @@
+﻿support,itemsets,n_items
+1.0,ram_bucket=unknown,1
+1.0,storage_bucket=128gb,1
+1.0,"ram_bucket=unknown, storage_bucket=128gb",2
+0.8034188034188035,"keyword=core, storage_bucket=128gb",2
+0.8034188034188035,"keyword=core, ram_bucket=unknown, storage_bucket=128gb",3
+0.8034188034188035,"keyword=core, ram_bucket=unknown",2
+0.8034188034188035,keyword=core,1
+0.5213675213675214,"rating_bucket=low, storage_bucket=128gb",2
+0.5213675213675214,"ram_bucket=unknown, rating_bucket=low",2
+0.5213675213675214,"ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",3
+0.5213675213675214,rating_bucket=low,1
+0.47863247863247865,"keyword=home, ram_bucket=unknown, storage_bucket=128gb",3
+0.47863247863247865,keyword=home,1
+0.47863247863247865,"keyword=home, storage_bucket=128gb",2
+0.47863247863247865,"keyword=home, ram_bucket=unknown",2
+0.4358974358974359,"keyword=core, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.4358974358974359,"keyword=core, rating_bucket=low",2
+0.4358974358974359,"keyword=core, ram_bucket=unknown, rating_bucket=low",3
+0.4358974358974359,"keyword=core, rating_bucket=low, storage_bucket=128gb",3
+0.4188034188034188,"cpu_family=i5, ram_bucket=unknown",2
+0.4188034188034188,"cpu_family=i5, ram_bucket=unknown, storage_bucket=128gb",3
+0.4188034188034188,cpu_family=i5,1
+0.4188034188034188,"cpu_family=i5, storage_bucket=128gb",2
+0.41025641025641024,"cpu_family=i5, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.41025641025641024,"cpu_family=i5, keyword=core",2
+0.41025641025641024,"cpu_family=i5, keyword=core, ram_bucket=unknown",3
+0.41025641025641024,"cpu_family=i5, keyword=core, storage_bucket=128gb",3
+0.3504273504273504,"keyword=core, keyword=home, storage_bucket=128gb",3
+0.3504273504273504,"keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.3504273504273504,"keyword=core, keyword=home, ram_bucket=unknown",3
+0.3504273504273504,"keyword=core, keyword=home",2
+0.3418803418803419,"price_segment=premium, ram_bucket=unknown",2
+0.3418803418803419,"price_segment=premium, storage_bucket=128gb",2
+0.3418803418803419,"price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",3
+0.3418803418803419,price_segment=premium,1
+0.3333333333333333,price_segment=budget,1
+0.3333333333333333,"price_segment=budget, storage_bucket=128gb",2
+0.3333333333333333,"price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",3
+0.3333333333333333,"price_segment=budget, ram_bucket=unknown",2
+0.3247863247863248,price_segment=midrange,1
+0.3247863247863248,"price_segment=midrange, storage_bucket=128gb",2
+0.3247863247863248,"price_segment=midrange, ram_bucket=unknown",2
+0.3247863247863248,"price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",3
+0.3247863247863248,"keyword=core, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",4
+0.3247863247863248,"keyword=core, price_segment=midrange, storage_bucket=128gb",3
+0.3247863247863248,"keyword=core, price_segment=midrange",2
+0.3247863247863248,"keyword=core, price_segment=midrange, ram_bucket=unknown",3
+0.3162393162393162,"keyword=core, price_segment=premium, storage_bucket=128gb",3
+0.3162393162393162,"keyword=core, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",4
+0.3162393162393162,"keyword=core, price_segment=premium, ram_bucket=unknown",3
+0.3162393162393162,"keyword=core, price_segment=premium",2
+0.29914529914529914,"ram_bucket=unknown, rating_bucket=medium",2
+0.29914529914529914,"rating_bucket=medium, storage_bucket=128gb",2
+0.29914529914529914,rating_bucket=medium,1
+0.29914529914529914,"ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",3
+0.27350427350427353,"cpu_family=i7, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.27350427350427353,"cpu_family=i7, keyword=core",2
+0.27350427350427353,"cpu_family=i7, storage_bucket=128gb",2
+0.27350427350427353,"cpu_family=i7, ram_bucket=unknown",2
+0.27350427350427353,"cpu_family=i7, keyword=core, ram_bucket=unknown",3
+0.27350427350427353,"cpu_family=i7, keyword=core, storage_bucket=128gb",3
+0.27350427350427353,cpu_family=i7,1
+0.27350427350427353,"cpu_family=i7, ram_bucket=unknown, storage_bucket=128gb",3
+0.2564102564102564,"keyword=core, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",4
+0.2564102564102564,"keyword=core, ram_bucket=unknown, rating_bucket=medium",3
+0.2564102564102564,"keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.2564102564102564,"keyword=core, rating_bucket=medium, storage_bucket=128gb",3
+0.2564102564102564,"keyword=core, rating_bucket=medium",2
+0.2564102564102564,"keyword=home, ram_bucket=unknown, rating_bucket=low",3
+0.2564102564102564,"keyword=home, rating_bucket=low",2
+0.2564102564102564,"keyword=home, rating_bucket=low, storage_bucket=128gb",3
+0.24786324786324787,"keyword=core, keyword=geforce, storage_bucket=128gb",3
+0.24786324786324787,"keyword=core, keyword=geforce, ram_bucket=unknown",3
+0.24786324786324787,"keyword=geforce, ram_bucket=unknown, storage_bucket=128gb",3
+0.24786324786324787,"keyword=core, keyword=geforce",2
+0.24786324786324787,keyword=geforce,1
+0.24786324786324787,"keyword=geforce, ram_bucket=unknown",2
+0.24786324786324787,"keyword=core, keyword=geforce, ram_bucket=unknown, storage_bucket=128gb",4
+0.24786324786324787,"keyword=geforce, storage_bucket=128gb",2
+0.2222222222222222,"cpu_family=i5, keyword=core, ram_bucket=unknown, rating_bucket=low",4
+0.2222222222222222,"cpu_family=i5, keyword=core, rating_bucket=low, storage_bucket=128gb",4
+0.2222222222222222,"cpu_family=i5, keyword=core, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.2222222222222222,"cpu_family=i5, rating_bucket=low",2
+0.2222222222222222,"cpu_family=i5, rating_bucket=low, storage_bucket=128gb",3
+0.2222222222222222,"cpu_family=i5, ram_bucket=unknown, rating_bucket=low",3
+0.2222222222222222,"cpu_family=i5, keyword=core, rating_bucket=low",3
+0.2222222222222222,"cpu_family=i5, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.21367521367521367,"cpu_family=i5, price_segment=midrange, ram_bucket=unknown",3
+0.21367521367521367,"brand=acer, keyword=acer",2
+0.21367521367521367,"cpu_family=i5, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",4
+0.21367521367521367,keyword=acer,1
+0.21367521367521367,"brand=acer, ram_bucket=unknown, storage_bucket=128gb",3
+0.21367521367521367,"brand=acer, keyword=acer, ram_bucket=unknown",3
+0.21367521367521367,"cpu_family=i5, price_segment=midrange, storage_bucket=128gb",3
+0.21367521367521367,"cpu_family=i5, price_segment=midrange",2
+0.21367521367521367,"keyword=acer, ram_bucket=unknown",2
+0.21367521367521367,"cpu_family=i5, keyword=core, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",5
+0.21367521367521367,"keyword=acer, storage_bucket=128gb",2
+0.21367521367521367,"brand=acer, storage_bucket=128gb",2
+0.21367521367521367,"brand=acer, ram_bucket=unknown",2
+0.21367521367521367,brand=acer,1
+0.21367521367521367,"cpu_family=i5, keyword=core, price_segment=midrange",3
+0.21367521367521367,"brand=acer, keyword=acer, ram_bucket=unknown, storage_bucket=128gb",4
+0.21367521367521367,"cpu_family=i5, keyword=core, price_segment=midrange, storage_bucket=128gb",4
+0.21367521367521367,"cpu_family=i5, keyword=core, price_segment=midrange, ram_bucket=unknown",4
+0.21367521367521367,"keyword=acer, ram_bucket=unknown, storage_bucket=128gb",3
+0.21367521367521367,"brand=acer, keyword=acer, storage_bucket=128gb",3
+0.20512820512820512,"keyword=core, price_segment=midrange, ram_bucket=unknown, rating_bucket=low",4
+0.20512820512820512,"keyword=core, price_segment=midrange, rating_bucket=low, storage_bucket=128gb",4
+0.20512820512820512,"price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.20512820512820512,"keyword=core, price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.20512820512820512,"price_segment=midrange, rating_bucket=low, storage_bucket=128gb",3
+0.20512820512820512,"price_segment=midrange, rating_bucket=low",2
+0.20512820512820512,"price_segment=midrange, ram_bucket=unknown, rating_bucket=low",3
+0.20512820512820512,"keyword=core, price_segment=midrange, rating_bucket=low",3
+0.19658119658119658,"keyword=core, keyword=home, rating_bucket=low, storage_bucket=128gb",4
+0.19658119658119658,"keyword=geforce, keyword=home, ram_bucket=unknown",3
+0.19658119658119658,"keyword=geforce, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.19658119658119658,"keyword=geforce, keyword=home, storage_bucket=128gb",3
+0.19658119658119658,"keyword=core, keyword=home, rating_bucket=low",3
+0.19658119658119658,"keyword=core, keyword=geforce, keyword=home",3
+0.19658119658119658,"keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.19658119658119658,"keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.19658119658119658,"keyword=core, keyword=geforce, keyword=home, storage_bucket=128gb",4
+0.19658119658119658,"keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown",4
+0.19658119658119658,"keyword=geforce, keyword=home",2
+0.19658119658119658,"keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=low",4
+0.1794871794871795,"keyword=home, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.1794871794871795,"keyword=asus, storage_bucket=128gb",2
+0.1794871794871795,"keyword=asus, ram_bucket=unknown",2
+0.1794871794871795,"keyword=asus, ram_bucket=unknown, storage_bucket=128gb",3
+0.1794871794871795,"keyword=home, price_segment=budget, ram_bucket=unknown",3
+0.1794871794871795,"keyword=home, price_segment=budget, storage_bucket=128gb",3
+0.1794871794871795,"keyword=home, price_segment=budget",2
+0.1794871794871795,"cpu_family=i7, price_segment=premium, storage_bucket=128gb",3
+0.1794871794871795,"cpu_family=i7, keyword=core, price_segment=premium, storage_bucket=128gb",4
+0.1794871794871795,keyword=asus,1
+0.1794871794871795,"cpu_family=i7, keyword=core, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.1794871794871795,rating_bucket=high,1
+0.1794871794871795,"ram_bucket=unknown, rating_bucket=high",2
+0.1794871794871795,"cpu_family=i7, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",4
+0.1794871794871795,"cpu_family=i7, price_segment=premium, ram_bucket=unknown",3
+0.1794871794871795,"rating_bucket=high, storage_bucket=128gb",2
+0.1794871794871795,"cpu_family=i7, price_segment=premium",2
+0.1794871794871795,"ram_bucket=unknown, rating_bucket=high, storage_bucket=128gb",3
+0.1794871794871795,"cpu_family=i7, keyword=core, price_segment=premium, ram_bucket=unknown",4
+0.1794871794871795,"cpu_family=i7, keyword=core, price_segment=premium",3
+0.17094017094017094,"keyword=core, keyword=dell",2
+0.17094017094017094,"keyword=core, keyword=dell, ram_bucket=unknown",3
+0.17094017094017094,"keyword=dell, ram_bucket=unknown, storage_bucket=128gb",3
+0.17094017094017094,"keyword=core, keyword=dell, storage_bucket=128gb",3
+0.17094017094017094,"brand=dell, ram_bucket=unknown",2
+0.17094017094017094,"brand=dell, storage_bucket=128gb",2
+0.17094017094017094,"brand=dell, keyword=core",2
+0.17094017094017094,"price_segment=premium, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.17094017094017094,"brand=dell, keyword=core, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",5
+0.17094017094017094,"cpu_family=i7, keyword=geforce",2
+0.17094017094017094,brand=dell,1
+0.17094017094017094,"brand=dell, keyword=dell",2
+0.17094017094017094,"keyword=dell, storage_bucket=128gb",2
+0.17094017094017094,"keyword=dell, ram_bucket=unknown",2
+0.17094017094017094,"keyword=lenovo, storage_bucket=128gb",2
+0.17094017094017094,"keyword=lenovo, ram_bucket=unknown, storage_bucket=128gb",3
+0.17094017094017094,"cpu_family=i7, keyword=geforce, ram_bucket=unknown, storage_bucket=128gb",4
+0.17094017094017094,"keyword=core, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",4
+0.17094017094017094,"brand=dell, keyword=core, ram_bucket=unknown",3
+0.17094017094017094,"brand=dell, keyword=core, storage_bucket=128gb",3
+0.17094017094017094,"cpu_family=i7, keyword=geforce, storage_bucket=128gb",3
+0.17094017094017094,"cpu_family=i7, keyword=geforce, ram_bucket=unknown",3
+0.17094017094017094,"price_segment=premium, rating_bucket=low",2
+0.17094017094017094,"keyword=lenovo, ram_bucket=unknown",2
+0.17094017094017094,"brand=dell, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.17094017094017094,"brand=dell, keyword=core, keyword=dell",3
+0.17094017094017094,"cpu_family=i7, keyword=core, keyword=geforce, storage_bucket=128gb",4
+0.17094017094017094,"brand=dell, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",4
+0.17094017094017094,"price_segment=premium, rating_bucket=low, storage_bucket=128gb",3
+0.17094017094017094,"price_segment=premium, ram_bucket=unknown, rating_bucket=low",3
+0.17094017094017094,"cpu_family=i7, keyword=core, keyword=geforce",3
+0.17094017094017094,"cpu_family=i7, keyword=core, keyword=geforce, ram_bucket=unknown",4
+0.17094017094017094,"brand=dell, keyword=core, keyword=dell, ram_bucket=unknown",4
+0.17094017094017094,"brand=lenovo, keyword=lenovo, ram_bucket=unknown",3
+0.17094017094017094,"brand=lenovo, keyword=lenovo, storage_bucket=128gb",3
+0.17094017094017094,"brand=lenovo, ram_bucket=unknown, storage_bucket=128gb",3
+0.17094017094017094,"brand=dell, ram_bucket=unknown, storage_bucket=128gb",3
+0.17094017094017094,"brand=lenovo, keyword=lenovo, ram_bucket=unknown, storage_bucket=128gb",4
+0.17094017094017094,"brand=dell, keyword=dell, ram_bucket=unknown",3
+0.17094017094017094,"brand=dell, keyword=dell, storage_bucket=128gb",3
+0.17094017094017094,keyword=lenovo,1
+0.17094017094017094,keyword=dell,1
+0.17094017094017094,"brand=dell, keyword=core, keyword=dell, storage_bucket=128gb",4
+0.17094017094017094,brand=lenovo,1
+0.17094017094017094,"brand=lenovo, storage_bucket=128gb",2
+0.17094017094017094,"cpu_family=i7, keyword=core, keyword=geforce, ram_bucket=unknown, storage_bucket=128gb",5
+0.17094017094017094,"brand=lenovo, keyword=lenovo",2
+0.17094017094017094,"brand=lenovo, ram_bucket=unknown",2
+0.1623931623931624,"cpu_family=i7, keyword=core, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.1623931623931624,"keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.1623931623931624,"brand=asus, keyword=asus, ram_bucket=unknown, storage_bucket=128gb",4
+0.1623931623931624,"brand=acer, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.1623931623931624,"brand=acer, keyword=home, ram_bucket=unknown",3
+0.1623931623931624,"keyword=acer, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.1623931623931624,"brand=acer, keyword=acer, keyword=home, ram_bucket=unknown",4
+0.1623931623931624,"brand=acer, keyword=acer, keyword=home, storage_bucket=128gb",4
+0.1623931623931624,"brand=asus, ram_bucket=unknown, storage_bucket=128gb",3
+0.1623931623931624,"cpu_family=i7, keyword=core, rating_bucket=low",3
+0.1623931623931624,"brand=asus, keyword=asus, ram_bucket=unknown",3
+0.1623931623931624,"brand=asus, keyword=asus, storage_bucket=128gb",3
+0.1623931623931624,"cpu_family=i7, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.1623931623931624,"keyword=core, price_segment=premium, rating_bucket=low",3
+0.1623931623931624,"keyword=core, price_segment=budget, ram_bucket=unknown",3
+0.1623931623931624,"brand=acer, keyword=home",2
+0.1623931623931624,brand=asus,1
+0.1623931623931624,"keyword=core, price_segment=budget, storage_bucket=128gb",3
+0.1623931623931624,"brand=asus, ram_bucket=unknown",2
+0.1623931623931624,"brand=asus, storage_bucket=128gb",2
+0.1623931623931624,"keyword=acer, keyword=home",2
+0.1623931623931624,"keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=low",4
+0.1623931623931624,"keyword=core, price_segment=premium, rating_bucket=low, storage_bucket=128gb",4
+0.1623931623931624,"cpu_family=i7, rating_bucket=low",2
+0.1623931623931624,"brand=acer, keyword=acer, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.1623931623931624,"brand=asus, keyword=asus",2
+0.1623931623931624,"keyword=core, price_segment=budget",2
+0.1623931623931624,"keyword=core, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.1623931623931624,"keyword=acer, keyword=home, ram_bucket=unknown",3
+0.1623931623931624,"keyword=acer, keyword=home, storage_bucket=128gb",3
+0.1623931623931624,"cpu_family=i7, rating_bucket=low, storage_bucket=128gb",3
+0.1623931623931624,"cpu_family=i7, ram_bucket=unknown, rating_bucket=low",3
+0.1623931623931624,"brand=acer, keyword=home, storage_bucket=128gb",3
+0.1623931623931624,"brand=acer, keyword=acer, keyword=home",3
+0.1623931623931624,"cpu_family=i7, keyword=core, ram_bucket=unknown, rating_bucket=low",4
+0.1623931623931624,"cpu_family=i7, keyword=core, rating_bucket=low, storage_bucket=128gb",4
+0.15384615384615385,"keyword=home, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",4
+0.15384615384615385,"brand=acer, keyword=core",2
+0.15384615384615385,"cpu_family=i7, keyword=home",2
+0.15384615384615385,"brand=acer, keyword=acer, keyword=core, ram_bucket=unknown, storage_bucket=128gb",5
+0.15384615384615385,"keyword=core, keyword=home, price_segment=midrange",3
+0.15384615384615385,"keyword=acer, keyword=core",2
+0.15384615384615385,"keyword=aspire, storage_bucket=128gb",2
+0.15384615384615385,"keyword=aspire, ram_bucket=unknown",2
+0.15384615384615385,"keyword=aspire, ram_bucket=unknown, storage_bucket=128gb",3
+0.15384615384615385,"keyword=acer, keyword=core, ram_bucket=unknown",3
+0.15384615384615385,"cpu_family=i7, keyword=core, keyword=home, storage_bucket=128gb",4
+0.15384615384615385,"cpu_family=i7, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.15384615384615385,"brand=acer, keyword=core, storage_bucket=128gb",3
+0.15384615384615385,"cpu_family=i7, keyword=core, keyword=home",3
+0.15384615384615385,"brand=acer, keyword=core, ram_bucket=unknown",3
+0.15384615384615385,"keyword=acer, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.15384615384615385,keyword=aspire,1
+0.15384615384615385,"brand=acer, keyword=acer, keyword=core, storage_bucket=128gb",4
+0.15384615384615385,"brand=acer, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.15384615384615385,"brand=acer, keyword=acer, keyword=core, ram_bucket=unknown",4
+0.15384615384615385,"cpu_family=i7, keyword=core, keyword=home, ram_bucket=unknown",4
+0.15384615384615385,"keyword=core, keyword=home, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",5
+0.15384615384615385,"cpu_family=i7, keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.15384615384615385,"keyword=home, price_segment=midrange",2
+0.15384615384615385,"keyword=home, price_segment=midrange, ram_bucket=unknown",3
+0.15384615384615385,"keyword=home, price_segment=midrange, storage_bucket=128gb",3
+0.15384615384615385,"keyword=core, keyword=home, price_segment=midrange, storage_bucket=128gb",4
+0.15384615384615385,"keyword=acer, keyword=core, storage_bucket=128gb",3
+0.15384615384615385,"cpu_family=i7, keyword=home, ram_bucket=unknown",3
+0.15384615384615385,"keyword=core, keyword=home, price_segment=midrange, ram_bucket=unknown",4
+0.15384615384615385,"brand=acer, keyword=acer, keyword=core",3
+0.15384615384615385,"cpu_family=i7, keyword=home, storage_bucket=128gb",3
+0.1452991452991453,"cpu_family=i5, price_segment=premium, ram_bucket=unknown",3
+0.1452991452991453,"cpu_family=i5, price_segment=premium, storage_bucket=128gb",3
+0.1452991452991453,"cpu_family=i5, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",4
+0.1452991452991453,"brand=lenovo, keyword=core, storage_bucket=128gb",3
+0.1452991452991453,"brand=lenovo, keyword=core, keyword=lenovo",3
+0.1452991452991453,"brand=lenovo, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.1452991452991453,"brand=lenovo, keyword=core, keyword=lenovo, storage_bucket=128gb",4
+0.1452991452991453,"brand=lenovo, keyword=core, keyword=lenovo, ram_bucket=unknown",4
+0.1452991452991453,"brand=lenovo, keyword=core, ram_bucket=unknown",3
+0.1452991452991453,"keyword=core, keyword=geforce, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.1452991452991453,"price_segment=budget, rating_bucket=low, storage_bucket=128gb",3
+0.1452991452991453,"price_segment=budget, ram_bucket=unknown, rating_bucket=low",3
+0.1452991452991453,"price_segment=budget, rating_bucket=low",2
+0.1452991452991453,"keyword=home, price_segment=premium",2
+0.1452991452991453,"keyword=core, keyword=geforce, ram_bucket=unknown, rating_bucket=low",4
+0.1452991452991453,"keyword=core, keyword=geforce, rating_bucket=low, storage_bucket=128gb",4
+0.1452991452991453,"keyword=core, keyword=lenovo, ram_bucket=unknown, storage_bucket=128gb",4
+0.1452991452991453,"keyword=core, keyword=lenovo",2
+0.1452991452991453,"keyword=home, price_segment=premium, ram_bucket=unknown",3
+0.1452991452991453,"keyword=home, price_segment=premium, storage_bucket=128gb",3
+0.1452991452991453,"keyword=geforce, rating_bucket=low",2
+0.1452991452991453,"keyword=geforce, rating_bucket=low, storage_bucket=128gb",3
+0.1452991452991453,"keyword=geforce, ram_bucket=unknown, rating_bucket=low",3
+0.1452991452991453,"cpu_family=i5, price_segment=premium",2
+0.1452991452991453,"keyword=home, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",4
+0.1452991452991453,"price_segment=budget, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.1452991452991453,"keyword=core, keyword=geforce, rating_bucket=low",3
+0.1452991452991453,"keyword=geforce, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.1452991452991453,"brand=lenovo, keyword=core, keyword=lenovo, ram_bucket=unknown, storage_bucket=128gb",5
+0.1452991452991453,"brand=lenovo, keyword=core",2
+0.1452991452991453,"keyword=core, keyword=lenovo, storage_bucket=128gb",3
+0.1452991452991453,"keyword=core, keyword=lenovo, ram_bucket=unknown",3
+0.13675213675213677,"brand=acer, price_segment=budget",2
+0.13675213675213677,keyword=linux,1
+0.13675213675213677,"brand=acer, keyword=aspire",2
+0.13675213675213677,"keyword=linux, ram_bucket=unknown, storage_bucket=128gb",3
+0.13675213675213677,"keyword=acer, price_segment=budget, ram_bucket=unknown",3
+0.13675213675213677,"keyword=acer, price_segment=budget, storage_bucket=128gb",3
+0.13675213675213677,"keyword=home, rating_bucket=medium, storage_bucket=128gb",3
+0.13675213675213677,"keyword=home, ram_bucket=unknown, rating_bucket=medium",3
+0.13675213675213677,"keyword=acer, keyword=aspire, storage_bucket=128gb",3
+0.13675213675213677,"keyword=acer, keyword=aspire, ram_bucket=unknown",3
+0.13675213675213677,"cpu_family=i5, price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=premium",3
+0.13675213675213677,"cpu_family=i5, price_segment=midrange, rating_bucket=low",3
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=midrange, rating_bucket=low",4
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=premium, ram_bucket=unknown",4
+0.13675213675213677,"brand=acer, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=midrange, ram_bucket=unknown, rating_bucket=low",5
+0.13675213675213677,"brand=acer, keyword=aspire, ram_bucket=unknown, storage_bucket=128gb",4
+0.13675213675213677,"brand=acer, keyword=acer, keyword=aspire, storage_bucket=128gb",4
+0.13675213675213677,"brand=acer, keyword=acer, price_segment=budget, ram_bucket=unknown",4
+0.13675213675213677,"brand=acer, keyword=acer, keyword=aspire, ram_bucket=unknown",4
+0.13675213675213677,"brand=acer, keyword=acer, price_segment=budget, storage_bucket=128gb",4
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=midrange, rating_bucket=low, storage_bucket=128gb",5
+0.13675213675213677,"keyword=linux, storage_bucket=128gb",2
+0.13675213675213677,"keyword=linux, ram_bucket=unknown",2
+0.13675213675213677,"keyword=home, rating_bucket=medium",2
+0.13675213675213677,"keyword=acer, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.13675213675213677,"brand=acer, keyword=acer, keyword=aspire",3
+0.13675213675213677,"brand=acer, price_segment=budget, storage_bucket=128gb",3
+0.13675213675213677,"brand=acer, keyword=acer, price_segment=budget",3
+0.13675213675213677,"brand=acer, keyword=acer, keyword=aspire, ram_bucket=unknown, storage_bucket=128gb",5
+0.13675213675213677,"brand=acer, price_segment=budget, ram_bucket=unknown",3
+0.13675213675213677,"keyword=acer, keyword=aspire, ram_bucket=unknown, storage_bucket=128gb",4
+0.13675213675213677,"brand=acer, keyword=acer, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",5
+0.13675213675213677,"brand=acer, keyword=aspire, storage_bucket=128gb",3
+0.13675213675213677,"keyword=acer, keyword=aspire",2
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",6
+0.13675213675213677,"keyword=acer, price_segment=budget",2
+0.13675213675213677,"keyword=home, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",4
+0.13675213675213677,"cpu_family=i5, keyword=core, price_segment=premium, storage_bucket=128gb",4
+0.13675213675213677,"brand=acer, keyword=aspire, ram_bucket=unknown",3
+0.13675213675213677,"cpu_family=i5, price_segment=midrange, ram_bucket=unknown, rating_bucket=low",4
+0.13675213675213677,"cpu_family=i5, price_segment=midrange, rating_bucket=low, storage_bucket=128gb",4
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, keyword=home, storage_bucket=128gb",5
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown",5
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, price_segment=premium, ram_bucket=unknown",5
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, price_segment=premium, storage_bucket=128gb",5
+0.1282051282051282,"keyword=geforce, price_segment=premium, ram_bucket=unknown",3
+0.1282051282051282,"keyword=geforce, price_segment=premium, storage_bucket=128gb",3
+0.1282051282051282,"keyword=aspire, price_segment=budget, ram_bucket=unknown",3
+0.1282051282051282,"keyword=core, keyword=geforce, price_segment=premium",3
+0.1282051282051282,"cpu_family=i7, keyword=geforce, keyword=home",3
+0.1282051282051282,"cpu_family=i7, keyword=geforce, price_segment=premium",3
+0.1282051282051282,"price_segment=premium, rating_bucket=medium, storage_bucket=128gb",3
+0.1282051282051282,"price_segment=premium, ram_bucket=unknown, rating_bucket=medium",3
+0.1282051282051282,"cpu_family=i7, keyword=geforce, price_segment=premium, ram_bucket=unknown",4
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, price_segment=premium",4
+0.1282051282051282,"cpu_family=i7, keyword=geforce, price_segment=premium, storage_bucket=128gb",4
+0.1282051282051282,"keyword=aspire, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.1282051282051282,"keyword=core, keyword=home, price_segment=premium, ram_bucket=unknown",4
+0.1282051282051282,"keyword=asus, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.1282051282051282,"cpu_family=i7, keyword=geforce, keyword=home, ram_bucket=unknown",4
+0.1282051282051282,"keyword=core, keyword=geforce, price_segment=premium, ram_bucket=unknown",4
+0.1282051282051282,"keyword=asus, keyword=home",2
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, keyword=home",4
+0.1282051282051282,"price_segment=premium, rating_bucket=medium",2
+0.1282051282051282,"cpu_family=i7, keyword=geforce, keyword=home, storage_bucket=128gb",4
+0.1282051282051282,"cpu_family=i7, keyword=geforce, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.1282051282051282,"keyword=asus, keyword=home, storage_bucket=128gb",3
+0.1282051282051282,"keyword=asus, keyword=home, ram_bucket=unknown",3
+0.1282051282051282,"cpu_family=i7, keyword=geforce, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.1282051282051282,"keyword=aspire, price_segment=budget, storage_bucket=128gb",3
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",6
+0.1282051282051282,"cpu_family=i7, keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown, storage_bucket=128gb",6
+0.1282051282051282,"keyword=core, keyword=geforce, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.1282051282051282,"keyword=aspire, price_segment=budget",2
+0.1282051282051282,"keyword=core, keyword=home, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.1282051282051282,"keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",5
+0.1282051282051282,"keyword=core, keyword=home, price_segment=premium",3
+0.1282051282051282,"keyword=core, price_segment=premium, rating_bucket=medium",3
+0.1282051282051282,"keyword=core, keyword=home, price_segment=premium, storage_bucket=128gb",4
+0.1282051282051282,"price_segment=premium, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",4
+0.1282051282051282,"keyword=geforce, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",4
+0.1282051282051282,"keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=medium",4
+0.1282051282051282,"keyword=core, price_segment=premium, rating_bucket=medium, storage_bucket=128gb",4
+0.1282051282051282,"keyword=core, keyword=geforce, price_segment=premium, storage_bucket=128gb",4
+0.1282051282051282,"keyword=geforce, price_segment=premium",2
+0.11965811965811966,"cpu_family=i5, keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.11965811965811966,"cpu_family=i5, keyword=home, storage_bucket=128gb",3
+0.11965811965811966,"cpu_family=i5, keyword=home",2
+0.11965811965811966,"cpu_family=i5, keyword=home, ram_bucket=unknown",3
+0.11965811965811966,"cpu_family=i5, keyword=core, keyword=home",3
+0.11965811965811966,"cpu_family=i3, ram_bucket=unknown, storage_bucket=128gb",3
+0.11965811965811966,"cpu_family=i3, keyword=core",2
+0.11965811965811966,"brand=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",5
+0.11965811965811966,"keyword=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown",4
+0.11965811965811966,"keyword=core, keyword=home, rating_bucket=medium, storage_bucket=128gb",4
+0.11965811965811966,"keyword=core, keyword=linux, ram_bucket=unknown, storage_bucket=128gb",4
+0.11965811965811966,"keyword=core, keyword=linux",2
+0.11965811965811966,"keyword=core, keyword=geforce, price_segment=midrange, storage_bucket=128gb",4
+0.11965811965811966,"keyword=core, keyword=geforce, keyword=home, rating_bucket=low",4
+0.11965811965811966,"keyword=core, keyword=geforce, price_segment=midrange, ram_bucket=unknown",4
+0.11965811965811966,"brand=acer, keyword=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown",5
+0.11965811965811966,"keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=medium",4
+0.11965811965811966,"brand=acer, keyword=aspire, price_segment=budget, storage_bucket=128gb",4
+0.11965811965811966,"brand=acer, keyword=acer, keyword=aspire, price_segment=budget",4
+0.11965811965811966,"brand=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown",4
+0.11965811965811966,"keyword=acer, keyword=aspire, price_segment=budget",3
+0.11965811965811966,"keyword=geforce, price_segment=midrange, storage_bucket=128gb",3
+0.11965811965811966,"keyword=geforce, keyword=home, rating_bucket=low",3
+0.11965811965811966,"keyword=core, keyword=geforce, price_segment=midrange",3
+0.11965811965811966,"keyword=geforce, price_segment=midrange, ram_bucket=unknown",3
+0.11965811965811966,"keyword=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",5
+0.11965811965811966,cpu_family=i3,1
+0.11965811965811966,"cpu_family=i5, keyword=core, keyword=home, storage_bucket=128gb",4
+0.11965811965811966,"cpu_family=i3, keyword=core, storage_bucket=128gb",3
+0.11965811965811966,"cpu_family=i5, keyword=core, keyword=home, ram_bucket=unknown",4
+0.11965811965811966,"cpu_family=i3, storage_bucket=128gb",2
+0.11965811965811966,"cpu_family=i3, ram_bucket=unknown",2
+0.11965811965811966,"keyword=geforce, keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.11965811965811966,"keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",5
+0.11965811965811966,"keyword=core, keyword=home, rating_bucket=medium",3
+0.11965811965811966,"brand=acer, keyword=acer, keyword=aspire, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",6
+0.11965811965811966,"keyword=core, keyword=linux, ram_bucket=unknown",3
+0.11965811965811966,"keyword=core, keyword=geforce, keyword=home, rating_bucket=low, storage_bucket=128gb",5
+0.11965811965811966,"keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown, rating_bucket=low",5
+0.11965811965811966,"keyword=core, keyword=linux, storage_bucket=128gb",3
+0.11965811965811966,"keyword=core, keyword=geforce, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",5
+0.11965811965811966,"keyword=core, keyword=geforce, keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",6
+0.11965811965811966,"keyword=geforce, keyword=home, ram_bucket=unknown, rating_bucket=low",4
+0.11965811965811966,"keyword=geforce, keyword=home, rating_bucket=low, storage_bucket=128gb",4
+0.11965811965811966,"keyword=geforce, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",4
+0.11965811965811966,"keyword=geforce, price_segment=midrange",2
+0.11965811965811966,"brand=acer, keyword=acer, keyword=aspire, price_segment=budget, storage_bucket=128gb",5
+0.11965811965811966,"keyword=acer, keyword=aspire, price_segment=budget, storage_bucket=128gb",4
+0.11965811965811966,"cpu_family=i3, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.11965811965811966,"cpu_family=i3, keyword=core, ram_bucket=unknown",3
+0.11965811965811966,"cpu_family=i5, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.11965811965811966,"brand=acer, keyword=aspire, price_segment=budget",3
+0.1111111111111111,"brand=dell, keyword=core, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"brand=dell, cpu_family=i5, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=dell, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, keyword=dell",4
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, ram_bucket=unknown",4
+0.1111111111111111,"cpu_family=i5, keyword=core, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",5
+0.1111111111111111,"brand=dell, keyword=latitude",2
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=dell, ram_bucket=unknown",4
+0.1111111111111111,"brand=dell, keyword=core, keyword=dell, keyword=latitude",4
+0.1111111111111111,"brand=dell, keyword=core, keyword=latitude, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, keyword=core, keyword=latitude, ram_bucket=unknown",4
+0.1111111111111111,"brand=asus, keyword=home",2
+0.1111111111111111,"brand=acer, keyword=core, keyword=home, ram_bucket=unknown",4
+0.1111111111111111,"brand=acer, keyword=core, keyword=home, storage_bucket=128gb",4
+0.1111111111111111,"brand=acer, keyword=acer, keyword=core, keyword=home",4
+0.1111111111111111,"brand=dell, cpu_family=i5",2
+0.1111111111111111,"keyword=core, rating_bucket=high, storage_bucket=128gb",3
+0.1111111111111111,"keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",3
+0.1111111111111111,"keyword=asus, keyword=core, ram_bucket=unknown",3
+0.1111111111111111,"keyword=acer, keyword=core, keyword=home",3
+0.1111111111111111,"keyword=home, price_segment=midrange, rating_bucket=low",3
+0.1111111111111111,"keyword=dell, keyword=latitude, storage_bucket=128gb",3
+0.1111111111111111,"keyword=core, keyword=home, price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",6
+0.1111111111111111,keyword=latitude,1
+0.1111111111111111,"keyword=core, keyword=dell, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"keyword=acer, keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"cpu_family=i7, price_segment=premium, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.1111111111111111,"keyword=asus, keyword=core, storage_bucket=128gb",3
+0.1111111111111111,"keyword=core, keyword=dell, keyword=latitude",3
+0.1111111111111111,"cpu_family=i7, keyword=core, price_segment=premium, rating_bucket=low, storage_bucket=128gb",5
+0.1111111111111111,"cpu_family=i7, keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=low",5
+0.1111111111111111,"keyword=core, keyword=home, price_segment=midrange, ram_bucket=unknown, rating_bucket=low",5
+0.1111111111111111,"cpu_family=i5, ram_bucket=unknown, rating_bucket=medium",3
+0.1111111111111111,"cpu_family=i5, rating_bucket=medium, storage_bucket=128gb",3
+0.1111111111111111,"cpu_family=i7, price_segment=premium, rating_bucket=low",3
+0.1111111111111111,"keyword=core, ram_bucket=unknown, rating_bucket=high",3
+0.1111111111111111,"keyword=dell, keyword=latitude, ram_bucket=unknown",3
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, storage_bucket=128gb",4
+0.1111111111111111,"brand=asus, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"brand=asus, keyword=asus, keyword=home, ram_bucket=unknown",4
+0.1111111111111111,"brand=asus, keyword=asus, keyword=home, storage_bucket=128gb",4
+0.1111111111111111,"cpu_family=i5, keyword=core, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"brand=dell, keyword=dell, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"cpu_family=i5, keyword=core, keyword=dell, ram_bucket=unknown",4
+0.1111111111111111,"cpu_family=i5, keyword=core, keyword=dell, storage_bucket=128gb",4
+0.1111111111111111,"cpu_family=i5, keyword=core, rating_bucket=medium",3
+0.1111111111111111,"cpu_family=i5, keyword=core, keyword=dell",3
+0.1111111111111111,"cpu_family=i5, keyword=dell, ram_bucket=unknown",3
+0.1111111111111111,"cpu_family=i5, keyword=dell, storage_bucket=128gb",3
+0.1111111111111111,"brand=dell, keyword=core, keyword=dell, keyword=latitude, ram_bucket=unknown",5
+0.1111111111111111,"brand=dell, keyword=core, keyword=dell, keyword=latitude, storage_bucket=128gb",5
+0.1111111111111111,"cpu_family=i5, keyword=dell",2
+0.1111111111111111,"cpu_family=i5, rating_bucket=medium",2
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"brand=dell, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, keyword=dell, keyword=latitude, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, keyword=dell, keyword=latitude, ram_bucket=unknown",4
+0.1111111111111111,"cpu_family=i7, keyword=core, price_segment=premium, rating_bucket=low",4
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core",3
+0.1111111111111111,"cpu_family=i5, keyword=core, ram_bucket=unknown, rating_bucket=medium",4
+0.1111111111111111,"cpu_family=i5, keyword=core, rating_bucket=medium, storage_bucket=128gb",4
+0.1111111111111111,"cpu_family=i5, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"cpu_family=i5, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, keyword=dell, keyword=latitude",3
+0.1111111111111111,"brand=dell, keyword=latitude, ram_bucket=unknown",3
+0.1111111111111111,"brand=asus, keyword=asus, keyword=home",3
+0.1111111111111111,"cpu_family=i7, price_segment=premium, ram_bucket=unknown, rating_bucket=low",4
+0.1111111111111111,"brand=dell, cpu_family=i5, storage_bucket=128gb",3
+0.1111111111111111,"brand=dell, keyword=core, keyword=latitude",3
+0.1111111111111111,"brand=dell, cpu_family=i5, ram_bucket=unknown",3
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=dell",3
+0.1111111111111111,"brand=asus, keyword=home, storage_bucket=128gb",3
+0.1111111111111111,"keyword=asus, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"brand=asus, keyword=home, ram_bucket=unknown",3
+0.1111111111111111,"brand=dell, keyword=latitude, storage_bucket=128gb",3
+0.1111111111111111,"keyword=core, keyword=home, price_segment=midrange, rating_bucket=low",4
+0.1111111111111111,"brand=acer, keyword=core, keyword=home",3
+0.1111111111111111,"keyword=core, keyword=dell, keyword=latitude, ram_bucket=unknown",4
+0.1111111111111111,"keyword=core, keyword=dell, keyword=latitude, storage_bucket=128gb",4
+0.1111111111111111,"brand=acer, keyword=acer, keyword=core, keyword=home, ram_bucket=unknown",5
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, keyword=dell, ram_bucket=unknown",5
+0.1111111111111111,"brand=acer, keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"brand=acer, keyword=acer, keyword=core, keyword=home, storage_bucket=128gb",5
+0.1111111111111111,"cpu_family=i7, price_segment=premium, rating_bucket=low, storage_bucket=128gb",4
+0.1111111111111111,"keyword=acer, keyword=core, keyword=home, ram_bucket=unknown",4
+0.1111111111111111,"keyword=acer, keyword=core, keyword=home, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, keyword=dell, storage_bucket=128gb",5
+0.1111111111111111,"brand=asus, keyword=asus, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.1111111111111111,"keyword=latitude, ram_bucket=unknown",2
+0.1111111111111111,"keyword=dell, keyword=latitude",2
+0.1111111111111111,"keyword=latitude, storage_bucket=128gb",2
+0.1111111111111111,"keyword=asus, keyword=core",2
+0.1111111111111111,"keyword=home, price_segment=midrange, ram_bucket=unknown, rating_bucket=low",4
+0.1111111111111111,"keyword=home, price_segment=midrange, rating_bucket=low, storage_bucket=128gb",4
+0.1111111111111111,"keyword=core, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"keyword=core, keyword=latitude",2
+0.1111111111111111,"keyword=core, rating_bucket=high",2
+0.1111111111111111,"keyword=dell, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",4
+0.1111111111111111,"keyword=core, ram_bucket=unknown, rating_bucket=high, storage_bucket=128gb",4
+0.1111111111111111,"brand=dell, keyword=core, keyword=dell, keyword=latitude, ram_bucket=unknown, storage_bucket=128gb",6
+0.1111111111111111,"brand=dell, cpu_family=i5, keyword=core, keyword=dell, ram_bucket=unknown, storage_bucket=128gb",6
+0.1111111111111111,"cpu_family=i7, keyword=core, price_segment=premium, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",6
+0.1111111111111111,"keyword=core, keyword=home, price_segment=midrange, rating_bucket=low, storage_bucket=128gb",5
+0.1111111111111111,"keyword=core, keyword=latitude, ram_bucket=unknown",3
+0.1111111111111111,"keyword=core, keyword=latitude, storage_bucket=128gb",3
+0.1111111111111111,"keyword=home, price_segment=midrange, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.1111111111111111,"brand=acer, keyword=acer, keyword=core, keyword=home, ram_bucket=unknown, storage_bucket=128gb",6
+0.10256410256410256,"keyword=geforce, keyword=home, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"brand=acer, keyword=acer, keyword=aspire, keyword=home, ram_bucket=unknown, storage_bucket=128gb",6
+0.10256410256410256,"keyword=core, keyword=geforce, keyword=home, price_segment=midrange, storage_bucket=128gb",5
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",6
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",6
+0.10256410256410256,"keyword=core, keyword=geforce, keyword=home, price_segment=midrange, ram_bucket=unknown, storage_bucket=128gb",6
+0.10256410256410256,"keyword=acer, rating_bucket=low",2
+0.10256410256410256,"keyword=aspire, keyword=home",2
+0.10256410256410256,"price_segment=budget, ram_bucket=unknown, rating_bucket=medium, storage_bucket=128gb",4
+0.10256410256410256,"brand=acer, keyword=acer, keyword=aspire, keyword=home, ram_bucket=unknown",5
+0.10256410256410256,"keyword=asus, rating_bucket=low",2
+0.10256410256410256,"keyword=geforce, keyword=home, price_segment=midrange, ram_bucket=unknown",4
+0.10256410256410256,"keyword=geforce, keyword=home, price_segment=midrange, storage_bucket=128gb",4
+0.10256410256410256,"price_segment=budget, rating_bucket=medium",2
+0.10256410256410256,"brand=acer, ram_bucket=unknown, rating_bucket=low",3
+0.10256410256410256,"brand=acer, rating_bucket=low, storage_bucket=128gb",3
+0.10256410256410256,"brand=asus, keyword=asus, keyword=core",3
+0.10256410256410256,"brand=acer, keyword=acer, rating_bucket=low",3
+0.10256410256410256,"keyword=asus, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.10256410256410256,"keyword=core, keyword=geforce, keyword=home, price_segment=midrange",4
+0.10256410256410256,"brand=acer, keyword=acer, keyword=aspire, keyword=home, storage_bucket=128gb",5
+0.10256410256410256,"brand=acer, keyword=acer, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.10256410256410256,"brand=acer, keyword=aspire, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"brand=asus, keyword=asus, keyword=core, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"keyword=acer, keyword=aspire, keyword=home, ram_bucket=unknown",4
+0.10256410256410256,"keyword=acer, keyword=aspire, keyword=home, storage_bucket=128gb",4
+0.10256410256410256,"keyword=acer, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.10256410256410256,"keyword=aspire, keyword=home, ram_bucket=unknown, storage_bucket=128gb",4
+0.10256410256410256,"brand=acer, keyword=aspire, keyword=home",3
+0.10256410256410256,"cpu_family=i7, keyword=home, price_segment=premium, ram_bucket=unknown",4
+0.10256410256410256,"cpu_family=i7, keyword=home, price_segment=premium, storage_bucket=128gb",4
+0.10256410256410256,"cpu_family=i7, keyword=home, ram_bucket=unknown, rating_bucket=low",4
+0.10256410256410256,"cpu_family=i7, keyword=home, rating_bucket=low, storage_bucket=128gb",4
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, price_segment=premium",4
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, rating_bucket=low",4
+0.10256410256410256,"brand=asus, keyword=core, ram_bucket=unknown",3
+0.10256410256410256,"brand=asus, keyword=core, storage_bucket=128gb",3
+0.10256410256410256,"cpu_family=i3, keyword=core, price_segment=budget, storage_bucket=128gb",4
+0.10256410256410256,"cpu_family=i3, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",4
+0.10256410256410256,"cpu_family=i3, keyword=core, price_segment=budget",3
+0.10256410256410256,"cpu_family=i3, price_segment=budget, ram_bucket=unknown",3
+0.10256410256410256,"cpu_family=i3, keyword=core, price_segment=budget, ram_bucket=unknown",4
+0.10256410256410256,"cpu_family=i3, price_segment=budget",2
+0.10256410256410256,"cpu_family=i3, keyword=core, price_segment=budget, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"brand=acer, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",4
+0.10256410256410256,"brand=asus, keyword=asus, keyword=core, ram_bucket=unknown",4
+0.10256410256410256,"brand=asus, keyword=asus, keyword=core, storage_bucket=128gb",4
+0.10256410256410256,"brand=asus, keyword=core, ram_bucket=unknown, storage_bucket=128gb",4
+0.10256410256410256,"cpu_family=i3, price_segment=budget, storage_bucket=128gb",3
+0.10256410256410256,"brand=acer, keyword=acer, keyword=aspire, keyword=home",4
+0.10256410256410256,"brand=acer, keyword=acer, ram_bucket=unknown, rating_bucket=low",4
+0.10256410256410256,"brand=acer, keyword=acer, rating_bucket=low, storage_bucket=128gb",4
+0.10256410256410256,"brand=acer, keyword=aspire, keyword=home, ram_bucket=unknown",4
+0.10256410256410256,"brand=acer, keyword=aspire, keyword=home, storage_bucket=128gb",4
+0.10256410256410256,"brand=asus, keyword=core",2
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, price_segment=premium, ram_bucket=unknown",5
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, price_segment=premium, storage_bucket=128gb",5
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, ram_bucket=unknown, rating_bucket=low",5
+0.10256410256410256,"cpu_family=i7, keyword=core, keyword=home, rating_bucket=low, storage_bucket=128gb",5
+0.10256410256410256,"price_segment=budget, ram_bucket=unknown, rating_bucket=medium",3
+0.10256410256410256,"price_segment=budget, rating_bucket=medium, storage_bucket=128gb",3
+0.10256410256410256,"cpu_family=i7, keyword=home, price_segment=premium",3
+0.10256410256410256,"cpu_family=i7, keyword=home, rating_bucket=low",3
+0.10256410256410256,"keyword=acer, keyword=aspire, keyword=home",3
+0.10256410256410256,"keyword=acer, ram_bucket=unknown, rating_bucket=low",3
+0.10256410256410256,"keyword=acer, rating_bucket=low, storage_bucket=128gb",3
+0.10256410256410256,"keyword=aspire, keyword=home, ram_bucket=unknown",3
+0.10256410256410256,"keyword=aspire, keyword=home, storage_bucket=128gb",3
+0.10256410256410256,"keyword=geforce, keyword=home, price_segment=midrange",3
+0.10256410256410256,"keyword=asus, ram_bucket=unknown, rating_bucket=low",3
+0.10256410256410256,"keyword=asus, rating_bucket=low, storage_bucket=128gb",3
+0.10256410256410256,"brand=acer, rating_bucket=low",2
+0.10256410256410256,"cpu_family=i7, keyword=home, price_segment=premium, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"cpu_family=i7, keyword=home, ram_bucket=unknown, rating_bucket=low, storage_bucket=128gb",5
+0.10256410256410256,"keyword=acer, keyword=aspire, keyword=home, ram_bucket=unknown, storage_bucket=128gb",5
+0.10256410256410256,"keyword=core, keyword=geforce, keyword=home, price_segment=midrange, ram_bucket=unknown",5

@@ -1,0 +1,51 @@
+{
+  "scenario": "Catalogo de laptops: web mining + reglas de asociacion + redes neuronales",
+  "toolkit_path": "../ml_toolkit.py",
+  "random_state": 42,
+  "min_support": 0.1,
+  "min_confidence": 0.55,
+  "sources": [
+    "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
+  ],
+  "row_counts": {
+    "raw_products": 117,
+    "products_clean": 117,
+    "transactions": 1055,
+    "association_rules": 3711,
+    "nn_dataset": 117
+  },
+  "keywords": [
+    "core",
+    "home",
+    "acer",
+    "dell",
+    "asus",
+    "lenovo",
+    "aspire",
+    "geforce",
+    "latitude",
+    "strix",
+    "linux",
+    "vivobook",
+    "toshiba",
+    "thinkpad",
+    "touch"
+  ],
+  "price_thresholds": {
+    "q33": 533.3072000000001,
+    "q66": 1174.6304
+  },
+  "files": {
+    "raw_products_csv": "outputs\\01_raw_products.csv",
+    "products_csv": "outputs\\02_products_clean.csv",
+    "association_transactions_csv": "outputs\\03_transactions.csv",
+    "association_itemsets_csv": "outputs\\04_itemsets.csv",
+    "association_rules_csv": "outputs\\05_association_rules.csv",
+    "association_top_items_csv": "outputs\\06_top_items.csv",
+    "nn_dataset_csv": "outputs\\07_nn_dataset.csv",
+    "nn_holdout_results_csv": "outputs\\08_nn_holdout_results.csv",
+    "nn_cv_results_csv": "outputs\\09_nn_cv_results.csv",
+    "nn_confusion_matrices_json": "outputs\\10_nn_confusion_matrices.json",
+    "nn_architectures_json": "outputs\\11_nn_architectures.json"
+  }
+}

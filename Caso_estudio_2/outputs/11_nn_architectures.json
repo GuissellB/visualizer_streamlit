@@ -1,0 +1,58 @@
+{
+  "NN_01_Shallow_ReLU_Adam": {
+    "task": "classification",
+    "hidden_layer_sizes": [
+      16
+    ],
+    "activation": "relu",
+    "solver": "adam",
+    "max_iter": 600,
+    "early_stopping": false
+  },
+  "NN_02_Deep_ReLU_Adam": {
+    "task": "classification",
+    "hidden_layer_sizes": [
+      64,
+      32,
+      16
+    ],
+    "activation": "relu",
+    "solver": "adam",
+    "max_iter": 900,
+    "early_stopping": true
+  },
+  "NN_03_Wide_Tanh_Adam": {
+    "task": "classification",
+    "hidden_layer_sizes": [
+      128,
+      64
+    ],
+    "activation": "tanh",
+    "solver": "adam",
+    "max_iter": 900,
+    "early_stopping": true
+  },
+  "NN_04_Compact_Logistic_LBFGS": {
+    "task": "classification",
+    "hidden_layer_sizes": [
+      32,
+      16
+    ],
+    "activation": "logistic",
+    "solver": "lbfgs",
+    "max_iter": 800,
+    "early_stopping": false
+  },
+  "NN_05_Tanh_SGD_MomentumLike": {
+    "task": "classification",
+    "hidden_layer_sizes": [
+      48,
+      24,
+      12
+    ],
+    "activation": "tanh",
+    "solver": "sgd",
+    "max_iter": 1200,
+    "early_stopping": true
+  }
+}
