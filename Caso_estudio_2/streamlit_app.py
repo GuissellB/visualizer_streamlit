@@ -9,6 +9,8 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import importlib.util
+import sys
 
 
 # =========================================================
@@ -165,18 +167,207 @@ def prepare_nn_long_format(df: pd.DataFrame) -> pd.DataFrame:
 
 def infer_best_metric(df: pd.DataFrame) -> Optional[str]:
     candidates = [
-        "F1_Pos",
         "Accuracy",
+        "F1_Pos",
         "ROC_AUC_Pos",
         "Recall_Pos",
         "Precision_Pos",
     ]
+
     for c in candidates:
         if c in df.columns:
-            return c
-    numeric_cols = [c for c in df.columns if c != "model_name" and pd.api.types.is_numeric_dtype(df[c])]
-    return numeric_cols[0] if numeric_cols else None
+            numeric = pd.to_numeric(df[c], errors="coerce")
+            if numeric.notna().any():
+                return c
 
+    for c in df.columns:
+        if c == "model_name":
+            continue
+        numeric = pd.to_numeric(df[c], errors="coerce")
+        if numeric.notna().any():
+            return c
+
+    return None
+#adding parse
+def parse_hidden_layers(text: str) -> tuple[int, ...]:
+    values = [x.strip() for x in str(text).split(",") if x.strip()]
+    if not values:
+        raise ValueError("Debes indicar al menos una capa oculta.")
+    return tuple(int(x) for x in values) 
+ 
+def load_case_module(case_script_path: str = "caso_estudio.py"):
+    script_path = Path(case_script_path).resolve()
+
+    if not script_path.exists():
+        raise FileNotFoundError(f"No se encontró el archivo del caso de estudio: {script_path}")
+
+    spec = importlib.util.spec_from_file_location("case_study_module", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo cargar el módulo desde: {script_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+def retrain_model_from_ui(
+    nn_dataset_df: pd.DataFrame,
+    hidden_layers_text: str,
+    activation: str,
+    solver: str,
+    alpha: float,
+    learning_rate_init: float,
+    max_iter: int,
+    early_stopping: bool,
+    random_state: int,
+    n_splits: int,
+    case_script_path: str = "caso_estudio.py",
+) -> Dict[str, Any]:
+    custom_name = "NN_06_Custom"
+
+    case_module = load_case_module(case_script_path)
+    toolkit = case_module.load_toolkit_module(Path("../ml_toolkit.py"))
+
+    dataset = nn_dataset_df.copy()
+
+    if dataset.empty:
+        raise ValueError("El dataset de redes neuronales está vacío.")
+
+    if "price_segment" not in dataset.columns:
+        raise ValueError("El dataset no contiene la columna objetivo 'price_segment'.")
+
+    dataset = dataset.replace([np.inf, -np.inf], np.nan)
+
+    for col in dataset.columns:
+        if col == "price_segment":
+            continue
+
+        if pd.api.types.is_numeric_dtype(dataset[col]):
+            median_val = dataset[col].median()
+            if pd.isna(median_val):
+                median_val = 0
+            dataset[col] = dataset[col].fillna(median_val)
+        else:
+            dataset[col] = dataset[col].fillna("Unknown")
+
+    feature_cols = [c for c in dataset.columns if c != "price_segment"]
+
+    remaining_nans = dataset[feature_cols].isna().sum().sum()
+    if remaining_nans > 0:
+        raise ValueError(f"El dataset aún contiene {remaining_nans} valores NaN después de la imputación.")
+
+    hidden_layers = parse_hidden_layers(hidden_layers_text)
+
+    runner = toolkit.NeuralNetworkRunner(
+        df=dataset,
+        target="price_segment",
+        task="classification",
+        features=feature_cols,
+        random_state=int(random_state),
+        encode_target=True,
+        pos_label=1,
+        hidden_layer_sizes=hidden_layers,
+        activation=activation,
+        solver=solver,
+        alpha=float(alpha),
+        learning_rate_init=float(learning_rate_init),
+        max_iter=int(max_iter),
+        early_stopping=bool(early_stopping),
+    )
+
+    holdout_metrics = case_module.flatten_metrics(runner.evaluate())
+    cv_metrics = case_module.flatten_metrics(
+        runner.evaluate_cv(n_splits=int(n_splits), shuffle=True)
+    )
+    architecture = runner.architecture()
+
+    confusion_payload = {}
+    cm = holdout_metrics.pop("ConfusionMatrix", None)
+    if cm is not None:
+        confusion_payload[custom_name] = cm
+
+    holdout_df = pd.DataFrame([{"model_name": custom_name, **holdout_metrics}])
+    cv_df = pd.DataFrame([{"model_name": custom_name, **cv_metrics}])
+
+    return {
+        "holdout_df": clean_metric_table(holdout_df),
+        "cv_df": clean_metric_table(cv_df),
+        "confusion_payload": confusion_payload,
+        "architecture_payload": {custom_name: architecture},
+    }
+
+#adding clean metric table
+def clean_metric_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    work = df.copy()
+
+    # Convertir strings tipo "None" a NaN
+    work = work.replace("None", np.nan)
+
+    # Intentar convertir columnas métricas a numéricas
+    for col in work.columns:
+        if col != "model_name":
+            work[col] = pd.to_numeric(work[col], errors="ignore")
+
+    # Eliminar columnas totalmente vacías, excepto model_name
+    cols_to_keep = []
+    for col in work.columns:
+        if col == "model_name":
+            cols_to_keep.append(col)
+        else:
+            if work[col].notna().any():
+                cols_to_keep.append(col)
+
+    work = work[cols_to_keep]
+
+    # Reordenar columnas importantes primero
+    preferred_order = [
+        "model_name",
+        "Accuracy",
+        "Accuracy_std",
+        "Error",
+        "Error_std",
+        "Recall_macro",
+        "Recall_macro_std",
+        "Precision_macro",
+        "Precision_macro_std",
+        "F1_macro",
+        "F1_macro_std",
+        "ROC_AUC_macro",
+        "ROC_AUC_macro_std",
+    ]
+
+    existing_preferred = [c for c in preferred_order if c in work.columns]
+    remaining = [c for c in work.columns if c not in existing_preferred]
+    work = work[existing_preferred + remaining]
+
+    return work
+
+def upsert_model_row(base_df: pd.DataFrame, new_df: pd.DataFrame, model_name: str = "NN_06_Custom") -> pd.DataFrame:
+    base = base_df.copy() if base_df is not None else pd.DataFrame()
+    new = new_df.copy() if new_df is not None else pd.DataFrame()
+
+    if not base.empty and "model_name" in base.columns:
+        base = base[base["model_name"] != model_name]
+
+    merged = pd.concat([base, new], ignore_index=True)
+
+    sort_col = infer_best_metric(merged)
+    if sort_col and sort_col in merged.columns:
+        numeric = pd.to_numeric(merged[sort_col], errors="coerce")
+        merged = merged.assign(_sort_metric=numeric).sort_values(
+            "_sort_metric", ascending=False, na_position="last"
+        ).drop(columns="_sort_metric")
+
+    return clean_metric_table(merged)
+
+
+def upsert_payload_dict(base_payload: Dict[str, Any], new_payload: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base_payload or {})
+    merged.update(new_payload or {})
+    return merged
 
 def section_card(title: str):
     container = st.container(border=True)
@@ -236,11 +427,16 @@ try:
     rules_df = prepare_rule_length_columns(bundle["rules"])
     itemsets_df = bundle["itemsets"]
     top_items_df = bundle["top_items"]
-    nn_holdout_df = bundle["nn_holdout"]
-    nn_cv_df = bundle["nn_cv"]
+    default_nn_holdout_df = clean_metric_table(bundle["nn_holdout"])
+    default_nn_cv_df = clean_metric_table(bundle["nn_cv"])
+    default_confusion_payload = bundle["nn_confusion"]
+    default_architecture_payload = bundle["nn_architectures"]
+
+    nn_holdout_df = st.session_state.get("nn_holdout_df", default_nn_holdout_df)
+    nn_cv_df = st.session_state.get("nn_cv_df", default_nn_cv_df)
     nn_dataset_df = bundle["nn_dataset"]
-    confusion_payload = bundle["nn_confusion"]
-    architecture_payload = bundle["nn_architectures"]
+    confusion_payload = st.session_state.get("confusion_payload", default_confusion_payload)
+    architecture_payload = st.session_state.get("architecture_payload", default_architecture_payload)
 except Exception as exc:
     st.error(f"No se pudieron cargar los archivos del proyecto: {exc}")
     st.stop()
@@ -319,21 +515,34 @@ if page == "Resumen":
             card.info("No hay items frecuentes disponibles.")
 
     card = section_card("Comparación rápida de modelos")
-    if not nn_holdout_df.empty:
-        best_metric = infer_best_metric(nn_holdout_df)
+    if not nn_cv_df.empty:
+        best_metric = infer_best_metric(nn_cv_df)
+
         if best_metric:
-            fig_models = px.bar(
-                nn_holdout_df.sort_values(best_metric, ascending=False),
-                x="model_name",
-                y=best_metric,
-                text=best_metric,
-            )
-            fig_models.update_layout(height=420, xaxis_title="Modelo", yaxis_title=best_metric)
-            card.plotly_chart(fig_models, use_container_width=True)
+            plot_df = nn_cv_df.copy()
+            plot_df[best_metric] = pd.to_numeric(plot_df[best_metric], errors="coerce")
+            plot_df = plot_df.dropna(subset=[best_metric])
+
+            if not plot_df.empty:
+                fig_models = px.bar(
+                    plot_df.sort_values(best_metric, ascending=False),
+                    x="model_name",
+                    y=best_metric,
+                    text=best_metric,
+                )
+                fig_models.update_traces(texttemplate="%{text:.3f}", textposition="outside")
+                fig_models.update_layout(
+                    height=420,
+                    xaxis_title="Modelo",
+                    yaxis_title=f"{best_metric} (CV)",
+                )
+                card.plotly_chart(fig_models, use_container_width=True)
+            else:
+                card.info(f"La métrica '{best_metric}' no tiene valores válidos en CV para graficar.")
         else:
-            card.info("No se encontró una métrica numérica para comparar modelos.")
+            card.info("No se encontró una métrica numérica válida en CV.")
     else:
-        card.info("No hay resultados holdout de redes neuronales.")
+        card.info("No hay resultados de validación cruzada de redes neuronales.")
 
 
 # =========================================================
@@ -342,41 +551,163 @@ if page == "Resumen":
 elif page == "Redes neuronales":
     card = section_card("Resultados de holdout y validación cruzada")
 
-    tab_holdout, tab_cv, tab_conf, tab_arch = card.tabs([
+    tab_params, tab_holdout, tab_cv, tab_conf, tab_arch = card.tabs([
+        "Parametrización",
         "Holdout",
         "Validación cruzada",
         "Matrices de confusión",
         "Arquitecturas",
     ])
 
-    with tab_holdout:
-        if nn_holdout_df.empty:
-            st.info("No hay resultados holdout disponibles.")
-        else:
-            long_df = prepare_nn_long_format(nn_holdout_df)
-            available_metrics = sorted(long_df["metric"].unique().tolist()) if not long_df.empty else []
-            default_metric = infer_best_metric(nn_holdout_df)
-            metric_selected = st.selectbox(
-                "Métrica a visualizar",
-                options=available_metrics,
-                index=available_metrics.index(default_metric) if default_metric in available_metrics else 0,
-                key="holdout_metric_selector",
-            ) if available_metrics else None
+    with tab_params:
+        st.subheader("Parámetros para reentrenamiento")
 
-            if metric_selected:
-                chart_df = long_df[long_df["metric"] == metric_selected].sort_values("value", ascending=False)
-                fig = px.bar(chart_df, x="model_name", y="value", text="value")
-                fig.update_layout(height=420, xaxis_title="Modelo", yaxis_title=metric_selected)
-                st.plotly_chart(fig, use_container_width=True)
+        col1, col2 = st.columns(2)
 
-            st.dataframe(nn_holdout_df, use_container_width=True, height=320)
-            if show_download_buttons:
-                st.download_button(
-                    "Descargar resultados holdout",
-                    data=nn_holdout_df.to_csv(index=False).encode("utf-8-sig"),
-                    file_name="nn_holdout_results.csv",
-                    mime="text/csv",
+        with col1:
+            hidden_layers_text = st.text_input(
+                "Capas ocultas",
+                value="64,32,16",
+                key="param_hidden_layers",
+                help="Escribe las neuronas por capa separadas por coma. Ejemplo: 64,32,16",
+            )
+
+            activation_selected = st.selectbox(
+                "Función de activación",
+                options=["relu", "tanh", "logistic"],
+                index=0,
+                key="param_activation",
+            )
+
+            solver_selected = st.selectbox(
+                "Solver",
+                options=["adam", "sgd", "lbfgs"],
+                index=0,
+                key="param_solver",
+            )
+
+            max_iter_selected = st.slider(
+                "Máximo de iteraciones",
+                min_value=100,
+                max_value=3000,
+                value=900,
+                step=50,
+                key="param_max_iter",
+            )
+
+            early_stopping_selected = st.checkbox(
+                "Early stopping",
+                value=True,
+                key="param_early_stopping",
+            )
+
+        with col2:
+            learning_rate_selected = st.number_input(
+                "Learning rate inicial",
+                min_value=0.0001,
+                max_value=0.1,
+                value=0.001,
+                step=0.0005,
+                format="%.4f",
+                key="param_learning_rate_init",
+            )
+
+            alpha_selected = st.number_input(
+                "Alpha",
+                min_value=0.00001,
+                max_value=1.0,
+                value=0.0001,
+                step=0.0001,
+                format="%.5f",
+                key="param_alpha",
+            )
+
+            random_state_selected = st.number_input(
+                "Random state",
+                min_value=0,
+                max_value=9999,
+                value=42,
+                step=1,
+                key="param_random_state",
+            )
+
+            n_splits_selected = st.slider(
+                "Número de folds para CV",
+                min_value=3,
+                max_value=10,
+                value=5,
+                step=1,
+                key="param_n_splits",
+            )
+
+            metric_selected_for_training = st.selectbox(
+                "Métrica principal de comparación",
+                options=["Accuracy", "Error"],
+                index=0,
+                key="param_metric_training",
+            )
+
+        retrain_clicked = st.button("Reentrenar modelo", key="btn_retrain_model")
+        if retrain_clicked:
+            try:
+                retrained = retrain_model_from_ui(
+                    nn_dataset_df=nn_dataset_df,
+                    hidden_layers_text=hidden_layers_text,
+                    activation=activation_selected,
+                    solver=solver_selected,
+                    alpha=alpha_selected,
+                    learning_rate_init=learning_rate_selected,
+                    max_iter=max_iter_selected,
+                    early_stopping=early_stopping_selected,
+                    random_state=int(random_state_selected),
+                    n_splits=int(n_splits_selected),
+                    case_script_path="caso_estudio.py",
                 )
+
+                base_holdout = st.session_state.get("nn_holdout_df", default_nn_holdout_df)
+                base_cv = st.session_state.get("nn_cv_df", default_nn_cv_df)
+                base_confusion = st.session_state.get("confusion_payload", default_confusion_payload)
+                base_arch = st.session_state.get("architecture_payload", default_architecture_payload)
+
+                st.session_state["nn_holdout_df"] = upsert_model_row(base_holdout, retrained["holdout_df"], "NN_06_Custom")
+                st.session_state["nn_cv_df"] = upsert_model_row(base_cv, retrained["cv_df"], "NN_06_Custom")
+                st.session_state["confusion_payload"] = upsert_payload_dict(base_confusion, retrained["confusion_payload"])
+                st.session_state["architecture_payload"] = upsert_payload_dict(base_arch, retrained["architecture_payload"])
+
+                st.success("Modelo reentrenado correctamente.")
+                st.rerun()
+
+            except Exception as exc:
+                st.error(f"No se pudo reentrenar el modelo: {exc}")
+                
+        with tab_holdout:
+            if nn_holdout_df.empty:
+                st.info("No hay resultados holdout disponibles.")
+            else:
+                long_df = prepare_nn_long_format(nn_holdout_df)
+                available_metrics = sorted(long_df["metric"].unique().tolist()) if not long_df.empty else []
+                default_metric = infer_best_metric(nn_holdout_df)
+                metric_selected = st.selectbox(
+                    "Métrica a visualizar",
+                    options=available_metrics,
+                    index=available_metrics.index(default_metric) if default_metric in available_metrics else 0,
+                    key="holdout_metric_selector",
+                ) if available_metrics else None
+
+                if metric_selected:
+                    chart_df = long_df[long_df["metric"] == metric_selected].sort_values("value", ascending=False)
+                    fig = px.bar(chart_df, x="model_name", y="value", text="value")
+                    fig.update_layout(height=420, xaxis_title="Modelo", yaxis_title=metric_selected)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.dataframe(nn_holdout_df, use_container_width=True, height=320)
+                if show_download_buttons:
+                    st.download_button(
+                        "Descargar resultados holdout",
+                        data=nn_holdout_df.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="nn_holdout_results.csv",
+                        mime="text/csv",
+                    )
 
     with tab_cv:
         if nn_cv_df.empty:
@@ -398,7 +729,7 @@ elif page == "Redes neuronales":
                 fig_cv.update_layout(height=420, xaxis_title="Modelo", yaxis_title=metric_selected_cv)
                 st.plotly_chart(fig_cv, use_container_width=True)
 
-            st.dataframe(nn_cv_df, use_container_width=True, height=320)
+            st.dataframe(nn_cv_df, use_container_width=True)
             if show_download_buttons:
                 st.download_button(
                     "Descargar resultados CV",
@@ -429,7 +760,7 @@ elif page == "Redes neuronales":
                 title=f"Matriz de confusión | {selected_model}",
             )
             st.plotly_chart(fig_conf, use_container_width=True)
-            st.dataframe(pd.DataFrame(matrix), use_container_width=False)
+            #st.dataframe(pd.DataFrame(matrix), use_container_width=False)
 
     with tab_arch:
         if not architecture_payload:
