@@ -509,7 +509,16 @@ if page == "Resumen":
                 orientation="h",
                 text="support_proxy",
             )
-            fig_top_items.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10))
+            fig_top_items.update_traces(
+                texttemplate="%{text:.1%}",
+                hovertemplate="Item: %{y}<br>Soporte: %{x:.1%}<extra></extra>",
+            )
+            fig_top_items.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=10, b=10),
+                xaxis_tickformat=".0%",
+                xaxis_title="Soporte (%)",
+            )
             card.plotly_chart(fig_top_items, use_container_width=True)
         else:
             card.info("No hay items frecuentes disponibles.")
@@ -867,7 +876,16 @@ elif page == "Reglas de asociación":
                         orientation="h",
                         text="support_proxy",
                     )
-                    fig_freq.update_layout(height=430, title="Items más frecuentes")
+                    fig_freq.update_traces(
+                        texttemplate="%{text:.1%}",
+                        hovertemplate="Item: %{y}<br>Soporte: %{x:.1%}<extra></extra>",
+                    )
+                    fig_freq.update_layout(
+                        height=430,
+                        title="Items más frecuentes",
+                        xaxis_tickformat=".0%",
+                        xaxis_title="Soporte (%)",
+                    )
                     st.plotly_chart(fig_freq, use_container_width=True)
                 else:
                     st.info("No hay top items disponibles.")
