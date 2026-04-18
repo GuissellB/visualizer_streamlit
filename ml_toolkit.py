@@ -800,6 +800,7 @@ class ModelEvaluator:
         return evaluator
 
     def _default_scoring(self) -> str:
+        # Si el usuario no define una métrica, se elige una razonable según el tipo de problema.
         if self.task == "classification":
             return "f1"
         if self.task == "regression":
@@ -807,15 +808,19 @@ class ModelEvaluator:
         raise ValueError("task debe ser 'classification' o 'regression'")
 
     def _default_cv(self):
+        # Si el runner principal ya existe, se reutiliza su estrategia de validación
+        # para mantener consistencia entre entrenamiento y búsqueda de hiperparámetros.
         if self.runner is not None:
             return self.runner.get_cv_strategy(n_splits=self.cv, shuffle=True)
 
+        # En clasificación conviene preservar la proporción de clases en cada fold.
         if self.task == "classification":
             return StratifiedKFold(
                 n_splits=self.cv,
                 shuffle=True,
                 random_state=self.random_state,
             )
+        # En regresión no hay clases que estratificar, así que se usa KFold estándar.
         if self.task == "regression":
             return KFold(
                 n_splits=self.cv,
@@ -825,6 +830,8 @@ class ModelEvaluator:
         raise ValueError("task debe ser 'classification' o 'regression'")
 
     def _normalize_search_result(self, searcher) -> Dict[str, Any]:
+        # Estandariza la salida de distintos buscadores (GridSearchCV, GASearchCV, etc.)
+        # para que el resto del toolkit pueda consumir siempre el mismo formato.
         return {
             "estimator": searcher.best_estimator_,
             "best_params": dict(searcher.best_params_),
@@ -834,21 +841,29 @@ class ModelEvaluator:
 
     def _normalize_genetic_param_grid(self, param_grid: Dict[str, Any]) -> Dict[str, Any]:
         """Convierte listas simples en espacios válidos para GASearchCV."""
+        # Import local: esta dependencia solo se necesita si realmente se usa
+        # la búsqueda genética, así evitamos romper el toolkit completo si no está instalada.
         from sklearn_genetic.space import Categorical
 
         normalized = {}
         for param_name, param_values in param_grid.items():
+            # Si el parámetro ya viene como espacio de búsqueda de sklearn-genetic,
+            # se respeta tal como fue definido.
             if hasattr(param_values, "sample"):
                 normalized[param_name] = param_values
                 continue
 
             if isinstance(param_values, (list, tuple, np.ndarray, pd.Series)):
+                # Si vienen varias opciones "simples", se convierten a un espacio categórico
+                # para que GASearchCV pueda explorarlas.
                 values = list(param_values)
                 if not values:
                     raise ValueError(f"El parámetro '{param_name}' no puede tener una lista vacía.")
                 normalized[param_name] = Categorical(values)
                 continue
 
+            # Si llega un único valor escalar, también se envuelve como categoría.
+            # Esto permite tratar todos los parámetros con una interfaz uniforme.
             normalized[param_name] = Categorical([param_values])
 
         return normalized
@@ -871,12 +886,15 @@ class ModelEvaluator:
         }
         """
         results: Dict[str, Dict[str, Any]] = {}
+        # Se construye una sola estrategia de validación para evaluar todos los modelos con la misma regla.
         cv_strategy = self._default_cv()
 
         for name, config in model_spaces.items():
+            # Cada entrada del diccionario describe un modelo y su grid de hiperparámetros.
             estimator = config["estimator"]
             param_grid = config["param_grid"]
 
+            # GridSearchCV evalúa exhaustivamente todas las combinaciones posibles.
             searcher = GridSearchCV(
                 estimator=estimator,
                 param_grid=param_grid,
@@ -885,6 +903,8 @@ class ModelEvaluator:
                 n_jobs=-1,
                 refit=True,
             )
+            # Ajusta todas las combinaciones sobre el conjunto de entrenamiento
+            # y conserva internamente la mejor según la métrica elegida.
             searcher.fit(self.X_train, self.y_train)
             results[name] = self._normalize_search_result(searcher)
 
@@ -898,6 +918,7 @@ class ModelEvaluator:
     ) -> Dict[str, Dict[str, Any]]:
         """Búsqueda evolutiva opcional con sklearn-genetic-opt."""
         try:
+            # Import local porque esta funcionalidad es opcional dentro del toolkit.
             from sklearn_genetic import GASearchCV
         except ImportError as exc:
             raise ImportError(
@@ -906,12 +927,17 @@ class ModelEvaluator:
             ) from exc
 
         results: Dict[str, Dict[str, Any]] = {}
+        # Igual que en GridSearch, todos los modelos se comparan bajo la misma estrategia CV.
         cv_strategy = self._default_cv()
 
         for name, config in model_spaces.items():
             estimator = config["estimator"]
+            # GASearchCV no consume listas "crudas" como GridSearchCV;
+            # necesita espacios de búsqueda definidos explícitamente.
             param_grid = self._normalize_genetic_param_grid(config["param_grid"])
 
+            # Aquí se configura el algoritmo evolutivo que irá proponiendo
+            # combinaciones candidatas de hiperparámetros.
             searcher = GASearchCV(
                 estimator=estimator,
                 cv=cv_strategy,
@@ -924,6 +950,7 @@ class ModelEvaluator:
                 algorithm="eaMuPlusLambda",
                 param_grid=param_grid,
             )
+            # Ejecuta la exploración evolutiva y al final deja disponible el mejor modelo encontrado.
             searcher.fit(self.X_train, self.y_train)
             results[name] = self._normalize_search_result(searcher)
 
@@ -1014,7 +1041,11 @@ class AssociationRulesExplorer:
     """Apriori + reglas de asociación sobre transacciones."""
 
     def __init__(self, transactions: Optional[Sequence[Sequence[str]]] = None):
+        # Cada transacción es una lista de ítems comprados/observados juntos.
+        # Ejemplo: ["pan", "leche", "mantequilla"].
         self.transactions = [list(tx) for tx in transactions] if transactions is not None else []
+        # Aquí se guardan las distintas etapas del pipeline:
+        # matriz binaria, itemsets frecuentes y reglas finales.
         self.encoded_: Optional[pd.DataFrame] = None
         self.itemsets_: Optional[pd.DataFrame] = None
         self.rules_: Optional[pd.DataFrame] = None
@@ -1026,6 +1057,8 @@ class AssociationRulesExplorer:
         transaction_col: str,
         item_col: str,
     ):
+        # Convierte un DataFrame "largo" (una fila por item) a una lista de transacciones.
+        # Esto permite trabajar tanto con datos crudos como con listas ya preparadas.
         if transaction_col not in df.columns or item_col not in df.columns:
             raise ValueError("Las columnas de transacción/item no existen en el DataFrame.")
         grouped = (
@@ -1038,6 +1071,8 @@ class AssociationRulesExplorer:
         return cls(grouped)
 
     def set_transactions(self, transactions: Sequence[Sequence[str]]):
+        # Reemplaza las transacciones actuales y limpia resultados previos
+        # para forzar que el pipeline se vuelva a calcular.
         self.transactions = [list(tx) for tx in transactions]
         self.encoded_ = None
         self.itemsets_ = None
@@ -1045,6 +1080,9 @@ class AssociationRulesExplorer:
         return self
 
     def encode_transactions(self) -> pd.DataFrame:
+        # Apriori no trabaja directamente con listas de strings;
+        # primero necesita una matriz booleana del tipo:
+        # transacción x item => True/False si el item aparece o no.
         if not self.transactions:
             raise ValueError("No hay transacciones cargadas.")
 
@@ -1056,13 +1094,17 @@ class AssociationRulesExplorer:
         return self.encoded_
 
     def fit_itemsets(self, min_support: float = 0.01, use_colnames: bool = True) -> pd.DataFrame:
+        # Si todavía no se codificaron las transacciones, se hace automáticamente.
         if self.encoded_ is None:
             self.encode_transactions()
 
         from mlxtend.frequent_patterns import apriori
 
+        # Apriori encuentra combinaciones frecuentes de items.
+        # "support" indica en qué proporción de transacciones aparece cada combinación.
         self.itemsets_ = apriori(self.encoded_, min_support=min_support, use_colnames=use_colnames)
         if not self.itemsets_.empty:
+            # n_items ayuda a explicar si el patrón es simple (1 item) o compuesto.
             self.itemsets_["n_items"] = self.itemsets_["itemsets"].apply(len)
             self.itemsets_ = self.itemsets_.sort_values("support", ascending=False).reset_index(drop=True)
         return self.itemsets_
@@ -1073,6 +1115,8 @@ class AssociationRulesExplorer:
         metric: str = "confidence",
         min_threshold: float = 0.5,
     ) -> pd.DataFrame:
+        # Las reglas se construyen a partir de los itemsets frecuentes;
+        # si aún no existen, se calculan primero.
         if self.itemsets_ is None:
             self.fit_itemsets(min_support=min_support)
 
@@ -1082,23 +1126,31 @@ class AssociationRulesExplorer:
             self.rules_ = pd.DataFrame()
             return self.rules_
 
+        # association_rules transforma itemsets en reglas del tipo:
+        # antecedente -> consecuente, junto con métricas como confidence y lift.
         self.rules_ = association_rules(self.itemsets_, metric=metric, min_threshold=min_threshold)
         if not self.rules_.empty:
+            # Se ordenan por la métrica principal para mostrar primero las reglas más fuertes.
             self.rules_ = self.rules_.sort_values(metric, ascending=False).reset_index(drop=True)
         return self.rules_
 
     def top_items(self, top_n: int = 10) -> pd.Series:
+        # Calcula qué items aparecen con más frecuencia de forma individual.
         if self.encoded_ is None:
             self.encode_transactions()
         return self.encoded_.mean(axis=0).sort_values(ascending=False).head(top_n)
 
     def filter_rules_by_consequent(self, item: str) -> pd.DataFrame:
+        # Útil cuando quieres responder preguntas como:
+        # "¿Qué cosas suelen implicar comprar X?"
         if self.rules_ is None:
             raise ValueError("Primero debes ejecutar fit_rules().")
         mask = self.rules_["consequents"].map(lambda x: item in x)
         return self.rules_.loc[mask].copy()
 
     def filter_rules_by_items(self, items: Iterable[str]) -> pd.DataFrame:
+        # Conserva solo las reglas compuestas por un conjunto permitido de items.
+        # Sirve para enfocar el análisis en una categoría o subconjunto concreto.
         if self.rules_ is None:
             raise ValueError("Primero debes ejecutar fit_rules().")
         target_items = set(items)
@@ -1137,9 +1189,13 @@ class NeuralNetworkRunner(SupervisedRunner):
         class_weight: Optional[object] = None,
         sampling_method: Optional[str] = None,
     ):
+        # Import local: solo se cargan las clases de redes neuronales
+        # cuando esta parte del toolkit realmente se usa.
         from sklearn.neural_network import MLPClassifier, MLPRegressor
 
         task_norm = task.lower()
+        # model_kwargs concentra la arquitectura y la configuración de entrenamiento
+        # para reutilizarla al crear el modelo y luego poder reportarla fácilmente.
         model_kwargs = {
             "hidden_layer_sizes": tuple(hidden_layer_sizes),
             "activation": activation,
@@ -1154,8 +1210,11 @@ class NeuralNetworkRunner(SupervisedRunner):
         }
 
         if preparer is None:
+            # Las redes neuronales suelen beneficiarse del escalado,
+            # por eso aquí se activa por defecto.
             preparer = DataPreparer(random_state=random_state, scale_X=True)
 
+        # Según el tipo de tarea, se construye la versión clasificadora o regresora del MLP.
         if task_norm == "classification":
             model = MLPClassifier(**model_kwargs)
         elif task_norm == "regression":
@@ -1163,6 +1222,7 @@ class NeuralNetworkRunner(SupervisedRunner):
         else:
             raise ValueError("task debe ser 'classification' o 'regression'")
 
+        # Se guarda la configuración para poder inspeccionarla luego sin depender del modelo interno.
         self.model_kwargs = model_kwargs
         super().__init__(
             df=df,
@@ -1179,6 +1239,8 @@ class NeuralNetworkRunner(SupervisedRunner):
         )
 
     def architecture(self) -> Dict[str, object]:
+        # Devuelve un resumen legible de la arquitectura/configuración de la red.
+        # Esto es útil para dashboards, reportes o comparación entre experimentos.
         return {
             "task": self.task,
             "hidden_layer_sizes": self.model_kwargs["hidden_layer_sizes"],
@@ -1201,9 +1263,12 @@ class WebMiningToolkit:
         timeout: int = 15,
         parser: str = "html.parser",
     ):
+        # headers ayuda a simular un navegador real en las peticiones HTTP.
         self.headers = headers or {"User-Agent": "Mozilla/5.0"}
         self.timeout = timeout
         self.parser = parser
+        # Se conserva la última página descargada para poder aplicar
+        # varios métodos de extracción sin volver a pedirla al servidor.
         self.last_html_: Optional[str] = None
         self.last_soup_ = None
 
@@ -1211,6 +1276,10 @@ class WebMiningToolkit:
         import requests
         from bs4 import BeautifulSoup
 
+        # Descarga una página estática y la convierte a BeautifulSoup
+        # para navegar su HTML con selectores y búsquedas.
+        # Úsalo cuando al inspeccionar la respuesta HTML ya aparecen
+        # los datos que quieres extraer, sin depender de JavaScript.
         response = requests.get(url, headers=self.headers, timeout=self.timeout)
         response.raise_for_status()
         self.last_html_ = response.text
@@ -1222,6 +1291,10 @@ class WebMiningToolkit:
         from bs4 import BeautifulSoup
         from selenium import webdriver
 
+        # Este método existe para páginas que renderizan contenido con JavaScript
+        # y que no se pueden extraer correctamente solo con requests.
+        # Úsalo cuando el HTML inicial no trae la información final y esta aparece
+        # después de cargar scripts, hacer scroll, esperar eventos o interactuar con la página.
         browser_factory = {"firefox": webdriver.Firefox, "chrome": webdriver.Chrome}
         if driver.lower() not in browser_factory:
             raise ValueError("driver debe ser 'firefox' o 'chrome'.")
@@ -1243,6 +1316,8 @@ class WebMiningToolkit:
         limit: Optional[int] = None,
         strip: bool = True,
     ) -> List[str]:
+        # Extrae texto plano desde etiquetas o selectores CSS.
+        # Es la forma más rápida de obtener titulares, precios, párrafos, etc.
         soup = self._require_soup()
         if css_selector:
             elements = soup.select(css_selector)
@@ -1257,6 +1332,8 @@ class WebMiningToolkit:
         attrs: Optional[Dict[str, str]] = None,
         href_contains: Optional[str] = None,
     ) -> List[str]:
+        # Recupera enlaces y permite filtrar solo los que contengan cierto patrón.
+        # Por ejemplo: productos, paginación o rutas internas.
         soup = self._require_soup()
         links = []
         for el in soup.find_all(tag, attrs=attrs, href=True):
@@ -1271,6 +1348,8 @@ class WebMiningToolkit:
         attrs: Optional[Dict[str, str]] = None,
         index: int = 0,
     ) -> pd.DataFrame:
+        # Útil cuando la web ya expone información tabular y conviene
+        # convertirla directo a DataFrame en lugar de parsear celda por celda.
         soup = self._require_soup()
         tables = soup.find_all("table", attrs=attrs)
         if not tables:
@@ -1285,6 +1364,8 @@ class WebMiningToolkit:
     ) -> List[str]:
         import re
 
+        # Filtra solo los textos que cumplen un patrón.
+        # Sirve para quedarse con teléfonos, precios, códigos o frases específicas.
         return [text for text in texts if re.search(pattern, text, flags=flags)]
 
     def regex_extract(
@@ -1296,6 +1377,8 @@ class WebMiningToolkit:
     ) -> pd.DataFrame:
         import re
 
+        # Busca patrones dentro de texto libre y devuelve los grupos capturados
+        # como columnas de un DataFrame listo para analizar.
         rows: List[Dict[str, object]] = []
         for text in texts:
             match = re.search(pattern, text, flags=flags)
@@ -1333,12 +1416,16 @@ class WebMiningToolkit:
             self.fetch(source_url)
 
         soup = self._require_soup()
+        # item_selector define el "bloque repetido" de la página:
+        # por ejemplo una tarjeta de producto o una fila de resultados.
         items = soup.select(item_selector)
         rows: List[Dict[str, object]] = []
 
         for item in items:
             row: Dict[str, object] = {}
             for field_name, spec in fields.items():
+                # Cada campo describe cómo sacar un dato puntual desde cada bloque:
+                # título, precio, enlace, descripción, rating, etc.
                 selector = spec.get("selector")
                 attr = spec.get("attr", "text")
                 default = spec.get("default")
@@ -1358,16 +1445,19 @@ class WebMiningToolkit:
                     row[field_name] = element.get(str(attr), default)
             rows.append(row)
 
+        # El resultado final ya queda en formato tabular para limpieza o modelado.
         return pd.DataFrame(rows)
 
     def _request_text(self, url: str) -> str:
         import requests
 
+        # Helper mínimo para reutilizar descargas cuando solo interesa el texto HTML.
         response = requests.get(url, headers=self.headers, timeout=self.timeout)
         response.raise_for_status()
         return response.text
 
     def _require_soup(self):
+        # Evita errores silenciosos cuando se intenta extraer sin haber descargado antes la página.
         if self.last_soup_ is None:
             raise ValueError("Primero debes ejecutar fetch() o fetch_dynamic().")
         return self.last_soup_
