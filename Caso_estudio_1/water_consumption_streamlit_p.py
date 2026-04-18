@@ -1,11 +1,17 @@
 import warnings
 from pathlib import Path
+import sys
 from typing import Dict, List
 from sklearn.neural_network import MLPRegressor
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from ml_toolkit import ARIMAForecaster, EDAExplorer, HoltWintersForecaster, TimeSeriesRunner, DataPreparer
 from visualizer import Visualizer

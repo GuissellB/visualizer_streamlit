@@ -1,4 +1,5 @@
 import math
+import sys
 from datetime import datetime
 
 import pandas as pd
@@ -6,6 +7,11 @@ import streamlit as st
 
 from pathlib import Path
 import numpy as np
+
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
@@ -21,9 +27,10 @@ from sklearn.metrics import (
     precision_recall_curve,
 )
 
-from app_config import (
+from config import (
     BALANCE_METHOD_OPTIONS,
     CLASS_WEIGHT,
+    CONFIG_DIR,
     CV_CRITERION_OPTIONS,
     DATA_PATH,
     DEFAULT_BEST_MODEL_CRITERION,
@@ -35,9 +42,11 @@ from app_config import (
     TARGET_COL,
     TUNING_FLOAT_FACTORS,
     TUNING_INT_STEPS,
+    MODEL_DEFAULT_PARAMS,
+    MODEL_PARAM_SCHEMA,
+    SHARED_PARAM_SCHEMA,
 )
 from ml_toolkit import EDAExplorer, DataPreparer, SupervisedRunner, get_positive_score
-from model_config import MODEL_DEFAULT_PARAMS, MODEL_PARAM_SCHEMA, SHARED_PARAM_SCHEMA
 from visualizer import Visualizer
 
 from xgboost import XGBClassifier
@@ -405,10 +414,11 @@ def get_configured_model(
 @st.cache_data(show_spinner=False)
 def load_model_df(csv_name: str) -> pd.DataFrame:
     # Aplica la preparación base con EDAExplorer para que el dashboard use la misma data del modelado.
-    base_dir = Path(__file__).resolve().parent
-    csv_path = base_dir / csv_name
+    csv_path = Path(csv_name)
+    if not csv_path.is_absolute():
+        csv_path = CONFIG_DIR / csv_path.name
     if not csv_path.exists():
-        raise FileNotFoundError(f"No encontré {csv_name} en {base_dir}")
+        raise FileNotFoundError(f"No encontré {csv_name} en {CONFIG_DIR}")
 
     eda = EDAExplorer(str(csv_path), num=1)
 

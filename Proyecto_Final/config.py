@@ -1,3 +1,51 @@
+from pathlib import Path
+
+
+CONFIG_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CONFIG_DIR.parent
+
+TARGET_COL = "result"
+DATA_PATH = str(CONFIG_DIR / "fixed_values_ds.csv")
+RANDOM_STATE = 42
+N_SPLITS = 10
+SEMILLAS = [1, 7, 21, 42, 99]
+CLASS_WEIGHT = "balanced"
+
+DEFAULT_BEST_MODEL_CRITERION = "ROC_AUC_CV_mean"
+DEFAULT_NO_CV_CRITERION = "ROC_AUC_Global"
+
+CV_CRITERION_OPTIONS = {
+    "ROC_AUC_CV_mean": "ROC AUC (CV)",
+    "F1_CV_mean": "F1 (CV)",
+    "Accuracy_CV_mean": "Accuracy (CV)",
+}
+
+NO_CV_CRITERION_OPTIONS = {
+    "ROC_AUC_Global": "ROC AUC (Global)",
+    "F1_Global": "F1 (Global)",
+    "Accuracy_Global": "Accuracy (Global)",
+}
+
+BALANCE_METHOD_OPTIONS = {
+    "none": "Sin balanceo",
+    "class_weight": "Pesos automáticos del modelo",
+    "undersample": "Submuestreo (NearMiss)",
+    "oversample": "Sobremuestreo (RandomOverSampler)",
+    "smote_tomek": "SMOTE + Tomek",
+}
+
+TUNING_INT_STEPS = {
+    "n_estimators": 50,
+    "num_leaves": 10,
+    "max_depth": 2,
+    "max_iter": None,
+}
+
+TUNING_FLOAT_FACTORS = {
+    "default_fractional": (0.8, 1.0, 1.2),
+    "default_continuous": (0.5, 1.0, 1.5),
+}
+
 MODEL_DEFAULT_PARAMS = {
     "Regresión Logística": {
         "solver": "liblinear",
