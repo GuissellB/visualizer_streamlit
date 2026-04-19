@@ -1,4 +1,5 @@
 import sys
+import warnings
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -17,6 +18,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, confusion_matrix, roc_curve, precision_recall_curve,
@@ -30,6 +32,7 @@ from ml_toolkit import (
     DataPreparer, SupervisedRunner, NeuralNetworkRunner,
     UnsupervisedRunner, AssociationRulesExplorer, WebMiningToolkit,
     get_positive_score,
+    ARIMAForecaster, EDAExplorer, HoltWintersForecaster, TimeSeriesRunner,
 )
 from visualizer import Visualizer
 
@@ -95,6 +98,7 @@ section[data-testid="stSidebar"] {
 # ── Session state ──────────────────────────────────────────────────────────────
 _DEFAULTS: dict = {
     "df": None, "df_name": "",
+    "_prep_cfg_exclude": [], "_prep_cfg_impute": "No imputar", "_prep_cfg_ohe": [],
     "sup_results": None, "sup_best_payload": None,
     "sup_target": None, "sup_task": "classification",
     "sup_features": [], "sup_balance": "none",
@@ -105,10 +109,44 @@ _DEFAULTS: dict = {
     "assoc_rules": None, "assoc_itemsets": None,
     "ws_texts": None, "ws_links": None, "ws_table": None,
     "ws_records": None, "ws_regex_texts": [],
+    "ts_analysis": None,
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+# ── Preprocessing aplicado globalmente en cada render ──────────────────────────
+def _apply_preprocessing() -> None:
+    """Reconstruye session_state['df'] desde df_raw + estados de widgets de preparación."""
+    if st.session_state.get("df_raw") is None:
+        return
+    _raw = st.session_state["df_raw"]
+
+    # 1) Excluir columnas
+    _exclude = [c for c in st.session_state.get("_prep_cfg_exclude", []) if c in _raw.columns]
+    _df = _raw.drop(columns=_exclude) if _exclude else _raw.copy()
+
+    # 2) Imputación
+    _strategy = st.session_state.get("_prep_cfg_impute", "No imputar")
+    if _strategy == "Eliminar filas con nulos":
+        _df = _df.dropna()
+    elif _strategy == "Media (numéricas)":
+        _num = _df.select_dtypes(include=np.number).columns
+        _df[_num] = _df[_num].fillna(_df[_num].mean())
+    elif _strategy == "Mediana (numéricas)":
+        _num = _df.select_dtypes(include=np.number).columns
+        _df[_num] = _df[_num].fillna(_df[_num].median())
+    elif _strategy == "Moda (todas)":
+        _df = _df.fillna(_df.mode().iloc[0])
+
+    # 3) One-hot encoding
+    _ohe = [c for c in st.session_state.get("_prep_cfg_ohe", []) if c in _df.columns]
+    if _ohe:
+        _df = pd.get_dummies(_df, columns=_ohe, drop_first=False, dtype=int)
+
+    st.session_state["df"] = _df
+
+_apply_preprocessing()
 
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 viz = Visualizer()
@@ -214,7 +252,7 @@ with st.sidebar:
     st.caption("Herramienta genérica de análisis de datos")
     page = st.radio(
         "Sección",
-        ["Datos", "EDA", "Supervisado", "No Supervisado", "Web Scraping"],
+        ["Datos", "EDA", "Supervisado", "No Supervisado", "Series de Tiempo", "Web Scraping"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -250,7 +288,8 @@ if page == "Datos":
         try:
             df = pd.read_csv(uploaded, sep=sep)
             st.session_state.update({
-                "df": df, "df_name": uploaded.name,
+                "df": df, "df_raw": df, "df_name": uploaded.name,
+                "_prep_cfg_exclude": [], "_prep_cfg_impute": "No imputar", "_prep_cfg_ohe": [],
                 "sup_results": None, "sup_best_payload": None, "sup_target": None,
                 "nn_result": None, "tuning_result": None, "stability_df": None,
                 "unsup_cluster_result": None, "unsup_dim_result": None,
@@ -282,6 +321,57 @@ if page == "Datos":
         })
         st.dataframe(dtype_df, use_container_width=True, hide_index=True)
         panel_close()
+
+        with st.expander("⚙️ Preparar datos", expanded=False):
+            st.caption("Los cambios aplican a todas las secciones (EDA, Supervisado, No Supervisado).")
+            _df_raw = st.session_state["df_raw"]
+
+            # 1) Excluir columnas
+            st.markdown("**Excluir columnas** (índices, IDs, columnas irrelevantes)")
+            _excl_val = st.multiselect(
+                "Columnas a excluir", _df_raw.columns.tolist(),
+                default=st.session_state["_prep_cfg_exclude"],
+                help="Selecciona columnas que no aportan al análisis.",
+            )
+            st.session_state["_prep_cfg_exclude"] = _excl_val
+
+            st.divider()
+
+            # 2) Imputación de nulos
+            _null_counts_raw = _df_raw.isnull().sum()
+            _cols_with_nulls = _null_counts_raw[_null_counts_raw > 0].index.tolist()
+            if _cols_with_nulls:
+                st.markdown(f"**Imputar nulos** — {len(_cols_with_nulls)} columna(s) con valores faltantes")
+                _opts_impute = ["No imputar", "Eliminar filas con nulos", "Media (numéricas)",
+                                "Mediana (numéricas)", "Moda (todas)"]
+                _impute_val = st.selectbox(
+                    "Estrategia global", _opts_impute,
+                    index=_opts_impute.index(st.session_state["_prep_cfg_impute"]),
+                )
+                st.session_state["_prep_cfg_impute"] = _impute_val
+            else:
+                st.success("No hay valores nulos en el dataset.")
+
+            st.divider()
+
+            # 3) One-hot encoding
+            st.markdown("**One-Hot Encoding** *(opcional)*")
+            _cat_cols_ohe = [c for c in _df_raw.select_dtypes(include=["object", "category"]).columns
+                             if c not in _excl_val]
+            if _cat_cols_ohe:
+                _valid_ohe = [c for c in st.session_state["_prep_cfg_ohe"] if c in _cat_cols_ohe]
+                _ohe_val = st.multiselect(
+                    "Columnas categóricas a codificar", _cat_cols_ohe,
+                    default=_valid_ohe,
+                    help="Se crean columnas 0/1 por cada categoría.",
+                )
+                st.session_state["_prep_cfg_ohe"] = _ohe_val
+            else:
+                st.caption("No hay columnas categóricas para codificar.")
+
+            # Resumen del df resultante
+            _proc_df = st.session_state["df"]
+            st.info(f"Dataset procesado: {_proc_df.shape[0]:,} filas × {_proc_df.shape[1]} columnas")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -418,7 +508,7 @@ elif page == "Supervisado":
                                    list(_BALANCE_LABELS.keys()), format_func=lambda x: _BALANCE_LABELS[x])
 
         feat_opts = [c for c in df.columns if c != target_col]
-        features_sel = st.multiselect("Features (vacío = todas)", feat_opts)
+        features_sel = st.multiselect("Features (vacío = todas excepto target)", feat_opts)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
         with sc1: train_size = st.slider("Train size", 0.5, 0.9, 0.75, 0.05)
@@ -881,7 +971,8 @@ elif page == "No Supervisado":
     df = st.session_state["df"]
     hero("Aprendizaje No Supervisado", "Clustering, reducción dimensional y reglas de asociación.")
 
-    num_cols_ns = df.select_dtypes(include=np.number).columns.tolist()
+    df_encoded = df
+    num_cols_ns = df_encoded.select_dtypes(include=np.number).columns.tolist()
 
     tab_cluster, tab_dim, tab_assoc = st.tabs(
         ["Clustering", "Reducción Dimensional", "Reglas de Asociación"]
@@ -900,11 +991,19 @@ elif page == "No Supervisado":
                 k = st.slider("Número de clusters (k)", 2, 15, 3, key="cl_k")
             with cl3:
                 linkage = st.selectbox("Linkage (HAC)", ["ward", "complete", "average", "single"])
-            color_cl = st.selectbox("Colorear scatter por", ["cluster"] + df.columns.tolist(), key="cl_color")
+            _vc1, _vc2, _vc3 = st.columns(3)
+            with _vc1:
+                color_cl = st.selectbox("Colorear por", ["cluster"] + df.columns.tolist(), key="cl_color")
+            with _vc2:
+                _vis_proj = st.selectbox("Proyección", ["PCA", "t-SNE"], key="cl_proj",
+                                         help="Método para proyectar los clusters al espacio visual.")
+            with _vc3:
+                _vis_dims = st.radio("Dimensiones", ["2D", "3D"], horizontal=True, key="cl_vis_dims_radio")
+            _n_vis = 3 if _vis_dims == "3D" else 2
 
             if st.button("Ejecutar clustering", type="primary"):
                 try:
-                    X_cl = df[feat_cl].dropna()
+                    X_cl = df_encoded[feat_cl].dropna()
                     model_cl = (KMeans(n_clusters=k, random_state=42, n_init="auto")
                                 if cl_algo == "KMeans"
                                 else AgglomerativeClustering(n_clusters=k, linkage=linkage))
@@ -913,11 +1012,21 @@ elif page == "No Supervisado":
                         name=cl_algo, X=X_cl, model=model_cl, kind=kind_cl, scale_X=True
                     )
                     runner_cl.fit()
-                    emb_cl = runner_cl.ensure_2d_embedding()
+                    _X_scaled = runner_cl.X
+                    if _vis_proj == "PCA":
+                        emb_cl = PCA(n_components=_n_vis, random_state=42).fit_transform(_X_scaled)
+                    elif _vis_proj == "t-SNE":
+                        from sklearn.manifold import TSNE
+                        emb_cl = TSNE(n_components=_n_vis, random_state=42,
+                                      perplexity=min(30, len(_X_scaled)-1)).fit_transform(_X_scaled)
+                    else:
+                        from sklearn.manifold import TSNE
+                        emb_cl = TSNE(n_components=_n_vis, random_state=42,
+                                      perplexity=min(30, len(_X_scaled)-1)).fit_transform(_X_scaled)
                     st.session_state["unsup_cluster_result"] = {
                         "embedding": emb_cl, "labels": runner_cl.labels_,
                         "metrics": runner_cl.metrics, "algo": cl_algo,
-                        "index": X_cl.index,
+                        "proj": _vis_proj, "index": X_cl.index,
                     }
                 except Exception as e:
                     st.error(f"Error en clustering: {e}")
@@ -931,19 +1040,122 @@ elif page == "No Supervisado":
                             metric_card(mk.capitalize(), f"{float(mv):.4f}", cr["algo"],
                                         ["#4f46e5","#7c3aed","#10b981","#f59e0b"][i % 4])
 
-                emb = cr["embedding"]
-                sdf = pd.DataFrame({"PC1": emb[:,0], "PC2": emb[:,1],
-                                    "Cluster": cr["labels"].astype(str)})
+                emb         = cr["embedding"]
+                labels      = cr["labels"].astype(str)
+                _is3d       = emb.shape[1] >= 3
+                _cl_palette = px.colors.qualitative.Bold
+                _unique_cl  = sorted(set(labels), key=lambda x: int(x))
+                _cl_colors  = {c: _cl_palette[i % len(_cl_palette)]
+                               for i, c in enumerate(_unique_cl)}
+
                 if color_cl != "cluster" and color_cl in df.columns:
-                    sdf["Color"] = df.loc[cr["index"], color_cl].values
-                    fig_cl = px.scatter(sdf, x="PC1", y="PC2", color="Color",
-                                        hover_data=["Cluster"], opacity=0.7)
+                    _ext_color = df.loc[cr["index"], color_cl].values
+                    if _is3d:
+                        fig_cl = px.scatter_3d(
+                            pd.DataFrame({"PC1": emb[:,0], "PC2": emb[:,1],
+                                          "PC3": emb[:,2], "Color": _ext_color,
+                                          "Cluster": labels}),
+                            x="PC1", y="PC2", z="PC3", color="Color",
+                            hover_data=["Cluster"], opacity=0.75,
+                        )
+                        fig_cl.update_traces(marker=dict(size=4))
+                    else:
+                        fig_cl = px.scatter(
+                            pd.DataFrame({"PC1": emb[:,0], "PC2": emb[:,1],
+                                          "Color": _ext_color, "Cluster": labels}),
+                            x="PC1", y="PC2", color="Color",
+                            hover_data=["Cluster"], opacity=0.75, symbol="Cluster",
+                        )
                 else:
-                    fig_cl = px.scatter(sdf, x="PC1", y="PC2", color="Cluster", opacity=0.7)
-                panel_open("Scatter 2D (PCA sobre espacio escalado)")
-                st.plotly_chart(_fig_layout(fig_cl, 420), use_container_width=True,
-                                config={"displayModeBar": False})
+                    fig_cl = go.Figure()
+                    for _cl in _unique_cl:
+                        _mask = np.array(labels) == _cl
+                        _col  = _cl_colors[_cl]
+                        if _is3d:
+                            fig_cl.add_trace(go.Scatter3d(
+                                x=emb[_mask, 0], y=emb[_mask, 1], z=emb[_mask, 2],
+                                mode="markers",
+                                marker=dict(size=4, color=_col, opacity=0.75),
+                                name=f"Cluster {_cl}",
+                                hovertemplate=f"Cluster {_cl}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<br>PC3: %{{z:.2f}}<extra></extra>",
+                            ))
+                            # Centroide 3D
+                            fig_cl.add_trace(go.Scatter3d(
+                                x=[emb[_mask, 0].mean()],
+                                y=[emb[_mask, 1].mean()],
+                                z=[emb[_mask, 2].mean()],
+                                mode="markers+text",
+                                marker=dict(size=8, color=_col, symbol="cross",
+                                            line=dict(width=2, color="black")),
+                                text=[f"C{_cl}"], textposition="top center",
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                        else:
+                            fig_cl.add_trace(go.Scatter(
+                                x=emb[_mask, 0], y=emb[_mask, 1], mode="markers",
+                                marker=dict(size=7, color=_col, opacity=0.75,
+                                            line=dict(width=0.3, color="white")),
+                                name=f"Cluster {_cl}",
+                                hovertemplate=f"Cluster {_cl}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<extra></extra>",
+                            ))
+                            fig_cl.add_trace(go.Scatter(
+                                x=[emb[_mask, 0].mean()], y=[emb[_mask, 1].mean()],
+                                mode="markers+text",
+                                marker=dict(size=14, color=_col, symbol="x",
+                                            line=dict(width=2, color="black")),
+                                text=[f"C{_cl}"], textposition="top center",
+                                textfont=dict(size=11, color="black"),
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                    if not _is3d:
+                        fig_cl.update_layout(
+                            legend=dict(title="Cluster"),
+                            plot_bgcolor="#f9fafb",
+                            xaxis=dict(showgrid=True, gridcolor="#e5e7eb", zeroline=False),
+                            yaxis=dict(showgrid=True, gridcolor="#e5e7eb", zeroline=False),
+                        )
+
+                _dim_label  = "3D" if _is3d else "2D"
+                _proj_label = cr.get("proj", "PCA")
+                panel_open(f"Clusters {cr['algo']} (proyección {_proj_label} {_dim_label})")
+                if _is3d:
+                    fig_cl.update_layout(height=520, margin=dict(l=0, r=0, t=40, b=0))
+                    st.plotly_chart(fig_cl, use_container_width=True)
+                else:
+                    st.plotly_chart(_fig_layout(fig_cl, 460), use_container_width=True,
+                                    config={"displayModeBar": False})
                 panel_close()
+
+            if cl_algo != "KMeans" and feat_cl:
+                with st.expander("Dendrograma", expanded=False):
+                    _hac_linkage = st.selectbox("Linkage para dendrograma",
+                                                ["ward", "complete", "average", "single"],
+                                                key="dendro_linkage")
+                    _hac_max_leaf = st.slider("Máx. hojas visibles", 10, 100, 30,
+                                              key="dendro_leaves")
+                    if st.button("Calcular Dendrograma", key="dendro_btn"):
+                        from scipy.cluster.hierarchy import linkage as sp_linkage, dendrogram
+                        import matplotlib.pyplot as plt
+                        X_hac = df[feat_cl].dropna()
+                        X_sc  = StandardScaler().fit_transform(X_hac)
+                        Z     = sp_linkage(X_sc, method=_hac_linkage)
+                        fig_d, ax = plt.subplots(figsize=(12, 4))
+                        dendrogram(Z, ax=ax, truncate_mode="lastp",
+                                   p=_hac_max_leaf, leaf_rotation=90,
+                                   leaf_font_size=9, show_contracted=True,
+                                   color_threshold=0.7 * max(Z[:, 2]))
+                        ax.set_title(f"Dendrograma HAC — linkage: {_hac_linkage}", fontsize=13)
+                        ax.set_xlabel("Observaciones (o tamaño del grupo)")
+                        ax.set_ylabel("Distancia")
+                        ax.spines[["top", "right"]].set_visible(False)
+                        fig_d.tight_layout()
+                        st.pyplot(fig_d, use_container_width=True)
+                        plt.close(fig_d)
+                        st.caption(
+                            "Cada unión representa una fusión de clusters. "
+                            "Corta el árbol a la altura donde los saltos verticales sean más largos "
+                            "para elegir el número óptimo de clusters."
+                        )
 
             if cl_algo == "KMeans" and feat_cl:
                 with st.expander("Método del codo (Elbow)", expanded=False):
@@ -971,24 +1183,44 @@ elif page == "No Supervisado":
                                   key="dim_feats")
         if feat_dim:
             d1, d2, d3 = st.columns(3)
-            with d1: dim_algo = st.selectbox("Algoritmo", ["PCA", "t-SNE", "UMAP"], key="dim_algo")
-            with d2: n_comp   = st.slider("Componentes", 2, min(3, len(feat_dim)), 2, key="dim_comp")
-            with d3: color_d  = st.selectbox("Colorear por", ["—"] + df.columns.tolist(), key="dim_color")
+            with d1: dim_algo = st.selectbox("Algoritmo", ["PCA", "t-SNE"], key="dim_algo")
+            with d2:
+                _max_comp = min(len(feat_dim), 10) if dim_algo == "PCA" else min(3, len(feat_dim))
+                n_comp = st.slider("Componentes", 2, _max_comp, 2, key="dim_comp")
+            with d3: color_d  = st.selectbox("Colorear por", ["—"] + df.columns.tolist(), key="dim_color",
+                                              help="Usa columnas del dataset original (sin OHE) para colorear.")
+
+            if dim_algo == "t-SNE":
+                _t1, _t2 = st.columns(2)
+                with _t1:
+                    tsne_perplexity = st.slider(
+                        "Perplexity", 5, 100, 30, step=5, key="tsne_perp",
+                        help="Baja (5-15): estructura local · Media (30): balance · Alta (50-100): estructura global",
+                    )
+                with _t2:
+                    tsne_iterations = st.slider(
+                        "Iteraciones", 250, 2000, 1000, step=250, key="tsne_iter",
+                        help="Más iteraciones = resultado más estable, pero más lento",
+                    )
 
             if st.button("Ejecutar reducción dimensional", type="primary"):
                 try:
-                    X_dim = df[feat_dim].dropna()
+                    X_dim = df_encoded[feat_dim].dropna()
                     if dim_algo == "PCA":
                         model_d = PCA(n_components=n_comp, random_state=42)
                         kind_d  = "pca"
                     elif dim_algo == "t-SNE":
                         from sklearn.manifold import TSNE
-                        model_d = TSNE(n_components=n_comp, random_state=42)
+                        model_d = TSNE(n_components=n_comp, random_state=42,
+                                       perplexity=tsne_perplexity,
+                                       max_iter=tsne_iterations)
                         kind_d  = "tsne"
                     else:
-                        import umap
-                        model_d = umap.UMAP(n_components=n_comp, random_state=42)
-                        kind_d  = "umap"
+                        from sklearn.manifold import TSNE
+                        model_d = TSNE(n_components=n_comp, random_state=42,
+                                       perplexity=tsne_perplexity,
+                                       max_iter=tsne_iterations)
+                        kind_d  = "tsne"
 
                     runner_d = UnsupervisedRunner(
                         name=dim_algo, X=X_dim, model=model_d, kind=kind_d, scale_X=True
@@ -999,6 +1231,7 @@ elif page == "No Supervisado":
                         "metrics":   runner_d.metrics,
                         "algo":      dim_algo,
                         "index":     X_dim.index,
+                        "model":     runner_d.model,
                     }
                 except ImportError as e:
                     st.error(f"Librería no instalada: {e}")
@@ -1009,40 +1242,306 @@ elif page == "No Supervisado":
             if dr:
                 emb_d = dr["embedding"]
                 idx_d = dr["index"]
+                _algo = dr["algo"]
+                _model = dr.get("model")
 
                 if dr["metrics"]:
                     mc = st.columns(len(dr["metrics"]), gap="medium")
                     for i, (mk, mv) in enumerate(dr["metrics"].items()):
                         with mc[i]:
-                            metric_card(mk, f"{float(mv):.4f}", dr["algo"], "#4f46e5")
+                            metric_card(mk, f"{float(mv):.4f}", _algo, "#4f46e5")
 
-                sdf_d = pd.DataFrame({"Dim1": emb_d[:,0], "Dim2": emb_d[:,1]})
-                if color_d != "—" and color_d in df.columns:
+                # Nombres de ejes según algoritmo + varianza explicada para PCA
+                _prefixes = {"PCA": "PC", "t-SNE": "t-SNE"}
+                _pfx = _prefixes.get(_algo, "Dim")
+                _evr = (getattr(_model, "explained_variance_ratio_", None)
+                        if _algo == "PCA" else None)
+                def _axis_label(i):
+                    if _evr is not None and i < len(_evr):
+                        return f"{_pfx}{i+1} ({_evr[i]*100:.1f}%)"
+                    return f"{_pfx}{i+1}"
+
+                ax1, ax2 = _axis_label(0), _axis_label(1)
+
+                # ── KMeans overlay para t-SNE / UMAP ──────────────────────
+                _km_labels = None
+                if _algo == "t-SNE":
+                    _kov1, _kov2 = st.columns([1, 3])
+                    with _kov1:
+                        _use_km = st.checkbox("Colorear por KMeans", key="dim_use_km")
+                    if _use_km:
+                        with _kov2:
+                            _km_k = st.slider("k clusters", 2, 12, 3, key="dim_km_k")
+                        _km_labels = (KMeans(n_clusters=_km_k, random_state=42, n_init="auto")
+                                      .fit_predict(emb_d).astype(str))
+
+                # Color final: KMeans > columna seleccionada > default
+                sdf_d = pd.DataFrame({ax1: emb_d[:,0], ax2: emb_d[:,1]})
+                if _km_labels is not None:
+                    sdf_d["Color"] = [f"Cluster {c}" for c in _km_labels]
+                    fig_d = px.scatter(sdf_d, x=ax1, y=ax2, color="Color",
+                                       color_discrete_sequence=px.colors.qualitative.Bold,
+                                       opacity=0.75)
+                elif color_d != "—" and color_d in df.columns:
                     sdf_d["Color"] = df.loc[idx_d, color_d].values
-                    fig_d = px.scatter(sdf_d, x="Dim1", y="Dim2", color="Color", opacity=0.7)
+                    fig_d = px.scatter(sdf_d, x=ax1, y=ax2, color="Color", opacity=0.7)
                 else:
-                    fig_d = px.scatter(sdf_d, x="Dim1", y="Dim2", opacity=0.6,
+                    fig_d = px.scatter(sdf_d, x=ax1, y=ax2, opacity=0.6,
                                        color_discrete_sequence=["#4f46e5"])
 
-                panel_open(f"Proyección {dr['algo']} 2D")
+                panel_open(f"Proyección {_algo} 2D")
                 st.plotly_chart(_fig_layout(fig_d, 450), use_container_width=True,
                                 config={"displayModeBar": False})
                 panel_close()
 
                 if emb_d.shape[1] >= 3:
-                    sdf_3d: dict = {"D1": emb_d[:,0], "D2": emb_d[:,1], "D3": emb_d[:,2]}
-                    if color_d != "—" and color_d in df.columns:
+                    ax3 = _axis_label(2)
+                    sdf_3d: dict = {ax1: emb_d[:,0], ax2: emb_d[:,1], ax3: emb_d[:,2]}
+                    if _km_labels is not None:
+                        sdf_3d["Color"] = [f"Cluster {c}" for c in _km_labels]
+                    elif color_d != "—" and color_d in df.columns:
                         sdf_3d["Color"] = df.loc[idx_d, color_d].values
-                    fig_3d = px.scatter_3d(pd.DataFrame(sdf_3d), x="D1", y="D2", z="D3",
-                                           color="Color" if color_d != "—" else None, opacity=0.6)
-                    fig_3d.update_layout(height=500, margin=dict(l=0, r=0, t=20, b=0))
+                    _has_color_3d = _km_labels is not None or color_d != "—"
+                    fig_3d = px.scatter_3d(
+                        pd.DataFrame(sdf_3d), x=ax1, y=ax2, z=ax3,
+                        color="Color" if _has_color_3d else None,
+                        color_discrete_sequence=(px.colors.qualitative.Bold
+                                                 if _km_labels is not None else None),
+                        opacity=0.7,
+                        title=f"Proyección {_algo} 3D",
+                    )
+                    fig_3d.update_traces(marker=dict(size=4))
+                    fig_3d.update_layout(height=550, margin=dict(l=0, r=0, t=40, b=0))
+                    panel_open(f"Proyección {_algo} 3D")
                     st.plotly_chart(fig_3d, use_container_width=True)
+                    panel_close()
+
+                # ── Varianza explicada por componente (solo PCA) ───────────
+                if _algo == "PCA" and _model is not None and hasattr(_model, "explained_variance_ratio_"):
+                    _evr_all   = _model.explained_variance_ratio_
+                    _evr_cum   = np.cumsum(_evr_all)
+                    _pc_labels = [f"PC{i+1}" for i in range(len(_evr_all))]
+                    _fig_var = go.Figure()
+                    _fig_var.add_trace(go.Bar(
+                        x=_pc_labels, y=_evr_all * 100,
+                        name="Varianza individual",
+                        marker_color="#4f46e5", opacity=0.85,
+                        text=[f"{v*100:.1f}%" for v in _evr_all],
+                        textposition="outside",
+                    ))
+                    _fig_var.add_trace(go.Scatter(
+                        x=_pc_labels, y=_evr_cum * 100,
+                        name="Varianza acumulada",
+                        mode="lines+markers",
+                        line=dict(color="#f59e0b", width=2),
+                        marker=dict(size=7),
+                        yaxis="y2",
+                    ))
+                    _fig_var.update_layout(
+                        title="Varianza Explicada por Componente",
+                        yaxis=dict(title="Varianza individual (%)", range=[0, max(_evr_all)*130]),
+                        yaxis2=dict(title="Varianza acumulada (%)", overlaying="y",
+                                    side="right", range=[0, 110],
+                                    showgrid=False, ticksuffix="%"),
+                        legend=dict(orientation="h", y=-0.2),
+                        height=380, plot_bgcolor="#f9fafb",
+                        margin=dict(l=40, r=60, t=50, b=40),
+                    )
+                    panel_open("Varianza Explicada por Componente")
+                    st.plotly_chart(_fig_var, use_container_width=True,
+                                    config={"displayModeBar": False})
+                    panel_close()
+
+                # ── Círculo de correlación / Biplot (solo PCA) ─────────────
+                if _algo == "PCA" and _model is not None:
+                    _comps  = _model.components_       # (n_comp, n_features)
+                    _feats  = feat_dim
+                    _scale  = np.sqrt(_model.explained_variance_)
+                    _n_comp = _comps.shape[0]
+                    _colors_cc = px.colors.qualitative.Plotly
+
+                    _show_pts = st.checkbox(
+                        "Mostrar observaciones en el círculo (Biplot)",
+                        value=False, key="pca_biplot",
+                    )
+                    # Scores normalizados a [-1, 1] para convivir con los loadings
+                    _scores = emb_d[:, :min(_n_comp, 3)]
+                    _scores_n = _scores / (np.abs(_scores).max(axis=0) + 1e-9)
+
+                    # Color de los puntos — separar en categorías si es string
+                    _pt_color_raw = (df.loc[idx_d, color_d].values
+                                     if color_d != "—" and color_d in df.columns
+                                     else None)
+                    _pt_is_cat = (_pt_color_raw is not None and
+                                  not np.issubdtype(np.array(_pt_color_raw).dtype, np.number))
+
+                    def _add_biplot_points(fig, xs, ys, zs=None):
+                        """Añade puntos al biplot respetando tipo de color."""
+                        is3d = zs is not None
+                        TraceClass = go.Scatter3d if is3d else go.Scatter
+                        if _pt_color_raw is None:
+                            kw = dict(mode="markers",
+                                      marker=dict(size=3 if is3d else 5,
+                                                  color="#94a3b8", opacity=0.35),
+                                      showlegend=False, hoverinfo="skip")
+                            fig.add_trace(TraceClass(x=xs, y=ys,
+                                                     **({} if not is3d else {"z": zs}),
+                                                     **kw))
+                        elif _pt_is_cat:
+                            _cats = pd.Categorical(_pt_color_raw)
+                            for _ci, _cat in enumerate(list(_cats.categories)):
+                                _mask = _cats == _cat
+                                _col  = _colors_cc[_ci % len(_colors_cc)]
+                                kw = dict(mode="markers", name=str(_cat),
+                                          marker=dict(size=3 if is3d else 5,
+                                                      color=_col, opacity=0.35),
+                                          showlegend=True,
+                                          hovertemplate=f"{color_d}: {_cat}<extra></extra>")
+                                fig.add_trace(TraceClass(
+                                    x=xs[_mask], y=ys[_mask],
+                                    **({} if not is3d else {"z": zs[_mask]}),
+                                    **kw))
+                        else:
+                            kw = dict(mode="markers",
+                                      marker=dict(size=3 if is3d else 5,
+                                                  color=_pt_color_raw,
+                                                  colorscale="Viridis", opacity=0.35,
+                                                  showscale=True),
+                                      showlegend=False,
+                                      hovertemplate=f"{color_d}: %{{marker.color:.2f}}<extra></extra>")
+                            fig.add_trace(TraceClass(x=xs, y=ys,
+                                                     **({} if not is3d else {"z": zs}),
+                                                     **kw))
+
+                    if _n_comp >= 3:
+                        # ── Versión 3D ──────────────────────────────────────
+                        _load3 = (_comps[:3] * _scale[:3, None]).T  # (n_feat, 3)
+                        _fig_cc = go.Figure()
+                        # Puntos (biplot 3D)
+                        if _show_pts:
+                            _add_biplot_points(_fig_cc,
+                                               _scores_n[:, 0],
+                                               _scores_n[:, 1],
+                                               _scores_n[:, 2])
+                        # Esferas de referencia (3 círculos en planos XY, XZ, YZ)
+                        _th = np.linspace(0, 2 * np.pi, 120)
+                        for _xs, _ys, _zs in [
+                            (np.cos(_th), np.sin(_th), np.zeros_like(_th)),
+                            (np.cos(_th), np.zeros_like(_th), np.sin(_th)),
+                            (np.zeros_like(_th), np.cos(_th), np.sin(_th)),
+                        ]:
+                            _fig_cc.add_trace(go.Scatter3d(
+                                x=_xs, y=_ys, z=_zs, mode="lines",
+                                line=dict(color="#d1d5db", width=1),
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                        # Flechas como cone + línea por variable
+                        for _j, _fname in enumerate(_feats):
+                            _cx = float(_load3[_j, 0])
+                            _cy = float(_load3[_j, 1])
+                            _cz = float(_load3[_j, 2])
+                            _col = _colors_cc[_j % len(_colors_cc)]
+                            _fig_cc.add_trace(go.Scatter3d(
+                                x=[0, _cx], y=[0, _cy], z=[0, _cz],
+                                mode="lines",
+                                line=dict(color=_col, width=4),
+                                showlegend=False,
+                                hovertemplate=(
+                                    f"<b>{_fname}</b><br>"
+                                    f"{ax1}: %{{x:.3f}}<br>"
+                                    f"{ax2}: %{{y:.3f}}<br>"
+                                    f"{_axis_label(2)}: %{{z:.3f}}<extra></extra>"
+                                ),
+                            ))
+                            _fig_cc.add_trace(go.Cone(
+                                x=[_cx], y=[_cy], z=[_cz],
+                                u=[_cx * 0.15], v=[_cy * 0.15], w=[_cz * 0.15],
+                                colorscale=[[0, _col], [1, _col]],
+                                showscale=False, showlegend=False,
+                                sizemode="absolute", sizeref=0.08,
+                                hoverinfo="skip",
+                            ))
+                            _fig_cc.add_trace(go.Scatter3d(
+                                x=[_cx * 1.15], y=[_cy * 1.15], z=[_cz * 1.15],
+                                mode="text", text=[_fname],
+                                textfont=dict(size=11, color=_col),
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                        _title_3d = ("Biplot PCA 3D" if _show_pts
+                                     else "Círculo de Correlación PCA 3D")
+                        _fig_cc.update_layout(
+                            title=_title_3d,
+                            scene=dict(
+                                xaxis=dict(title=ax1, range=[-1.3, 1.3]),
+                                yaxis=dict(title=ax2, range=[-1.3, 1.3]),
+                                zaxis=dict(title=_axis_label(2), range=[-1.3, 1.3]),
+                                bgcolor="#f9fafb",
+                            ),
+                            height=580, margin=dict(l=0, r=0, t=50, b=0),
+                        )
+                        _panel_title = ("Biplot PCA 3D" if _show_pts
+                                        else "Círculo de Correlación PCA 3D")
+                        panel_open(_panel_title)
+                        st.plotly_chart(_fig_cc, use_container_width=True)
+                        panel_close()
+
+                    else:
+                        # ── Versión 2D ──────────────────────────────────────
+                        _load2 = (_comps[:2] * _scale[:2, None]).T  # (n_feat, 2)
+                        _fig_cc = go.Figure()
+                        # Puntos (biplot 2D)
+                        if _show_pts:
+                            _add_biplot_points(_fig_cc,
+                                               _scores_n[:, 0],
+                                               _scores_n[:, 1])
+                        # Círculo de referencia
+                        _theta = np.linspace(0, 2 * np.pi, 200)
+                        _fig_cc.add_trace(go.Scatter(
+                            x=np.cos(_theta), y=np.sin(_theta), mode="lines",
+                            line=dict(color="#d1d5db", width=1, dash="dot"),
+                            showlegend=False, hoverinfo="skip",
+                        ))
+                        for _j, _fname in enumerate(_feats):
+                            _cx, _cy = float(_load2[_j, 0]), float(_load2[_j, 1])
+                            _col = _colors_cc[_j % len(_colors_cc)]
+                            _fig_cc.add_annotation(
+                                x=_cx, y=_cy, ax=0, ay=0,
+                                xref="x", yref="y", axref="x", ayref="y",
+                                showarrow=True,
+                                arrowhead=3, arrowsize=1.2, arrowwidth=1.8,
+                                arrowcolor=_col,
+                            )
+                            _fig_cc.add_trace(go.Scatter(
+                                x=[_cx * 1.12], y=[_cy * 1.12], mode="text",
+                                text=[_fname],
+                                textfont=dict(size=11, color=_col),
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                        _title_2d = ("Biplot PCA" if _show_pts
+                                     else "Círculo de Correlación (PC1 vs PC2)")
+                        _fig_cc.update_layout(
+                            title=_title_2d,
+                            xaxis=dict(title=ax1, range=[-1.3, 1.3], zeroline=True,
+                                       zerolinecolor="#9ca3af", showgrid=False),
+                            yaxis=dict(title=ax2, range=[-1.3, 1.3], zeroline=True,
+                                       zerolinecolor="#9ca3af", showgrid=False,
+                                       scaleanchor="x", scaleratio=1),
+                            height=520, plot_bgcolor="#f9fafb",
+                            margin=dict(l=40, r=40, t=50, b=40),
+                        )
+                        _panel_title2d = ("Biplot PCA" if _show_pts
+                                          else "Círculo de Correlación PCA")
+                        panel_open(_panel_title2d)
+                        st.plotly_chart(_fig_cc, use_container_width=True,
+                                        config={"displayModeBar": False})
+                        panel_close()
 
     # ── Reglas de Asociación ──────────────────────────────────────────────────
     with tab_assoc:
         fmt = st.radio(
             "¿Cómo están tus datos?",
             [
+                "Columnas categóricas  (una fila = una transacción, ítems = col:valor)",
                 "Formato largo  (una fila = un ítem, agrupar por transacción)",
                 "Matriz binaria  (columnas = ítems, valores 0/1)",
                 "Columna con listas  (valores separados por coma)",
@@ -1057,7 +1556,17 @@ elif page == "No Supervisado":
         with a2:
             min_lift = st.slider("Lift mínimo (filtro visual)", 0.5, 5.0, 1.0, 0.1, key="assoc_lift")
 
-        if "largo" in fmt:
+        if "categóricas" in fmt:
+            _cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+            _cat_cols += [c for c in df.select_dtypes(include=["int64","int32"]).columns
+                          if df[c].nunique() <= 10 and c not in _cat_cols]
+            cat_cols_sel = st.multiselect(
+                "Columnas categóricas a usar como ítems",
+                _cat_cols, default=_cat_cols[:min(5, len(_cat_cols))],
+                key="assoc_cat",
+                help="Cada fila será una transacción. Los ítems serán 'columna=valor'.",
+            )
+        elif "largo" in fmt:
             ac1, ac2 = st.columns(2)
             with ac1: tx_col   = st.selectbox("Columna transacción (ID)", df.columns.tolist(), key="assoc_tx")
             with ac2: item_col = st.selectbox("Columna ítem",             df.columns.tolist(), key="assoc_item")
@@ -1070,7 +1579,16 @@ elif page == "No Supervisado":
 
         if st.button("Ejecutar análisis de asociación", type="primary"):
             try:
-                if "largo" in fmt:
+                if "categóricas" in fmt:
+                    if not cat_cols_sel:
+                        st.error("Selecciona al menos 2 columnas.")
+                        st.stop()
+                    transactions = df[cat_cols_sel].dropna().apply(
+                        lambda row: [f"{col}={row[col]}" for col in cat_cols_sel],
+                        axis=1,
+                    ).tolist()
+                    explorer = AssociationRulesExplorer(transactions)
+                elif "largo" in fmt:
                     explorer = AssociationRulesExplorer.from_transaction_df(
                         df, transaction_col=tx_col, item_col=item_col
                     )
@@ -1355,3 +1873,294 @@ elif page == "Web Scraping":
                                                "regex_result.csv", "text/csv", key="ws_rg_dl")
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6) SERIES DE TIEMPO
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Series de Tiempo":
+    if not _require_df():
+        st.stop()
+
+    df_raw_ts = st.session_state["df"]
+    hero("Series de Tiempo", f"Análisis y pronóstico temporal — {st.session_state['df_name']}")
+
+    # ── Detección de columnas de fecha ──
+    def _ts_datetime_candidates(df: pd.DataFrame):
+        candidates = []
+        for col in df.columns:
+            if "datetime" in str(df[col].dtype):
+                candidates.append(col)
+            elif df[col].dtype == object:
+                try:
+                    pd.to_datetime(df[col].dropna().head(30))
+                    candidates.append(col)
+                except Exception:
+                    pass
+        return candidates or df.columns.tolist()[:1]
+
+    def _ts_prepare(df: pd.DataFrame, date_col: str, target_col: str) -> pd.DataFrame:
+        out = df[[date_col, target_col]].copy()
+        out[date_col] = pd.to_datetime(out[date_col])
+        out = out.dropna(subset=[date_col, target_col]).sort_values(date_col).reset_index(drop=True)
+        return out
+
+    def _ts_frequency_hint(date_series: pd.Series) -> str:
+        diffs = date_series.sort_values().diff().dropna()
+        if diffs.empty:
+            return "No determinada"
+        mode = diffs.mode().iloc[0]
+        if mode <= pd.Timedelta(hours=1): return "Horaria"
+        if mode <= pd.Timedelta(days=1): return "Diaria"
+        if mode <= pd.Timedelta(days=7): return "Semanal"
+        if mode <= pd.Timedelta(days=31): return "Mensual"
+        return str(mode)
+
+    def _ts_run_analysis(df, date_col, target_col, model_name, ranking_metric, lags, n_splits, train_pct, forecast_steps):
+        warnings.filterwarnings("ignore")
+        data = _ts_prepare(df, date_col, target_col)
+        if len(data) <= lags + max(5, n_splits):
+            raise ValueError("No hay suficientes registros para esa cantidad de lags y folds.")
+
+        model_df = data[[target_col]].copy()
+        train_size = train_pct / 100.0
+
+        model_map = {
+            "DeepLearning (Red Neuronal)": MLPRegressor(
+                hidden_layer_sizes=(64, 32), activation="relu", solver="adam", max_iter=500, random_state=42
+            ),
+            "HoltWinters": HoltWintersForecaster(seasonal_periods=7),
+            "HoltWinters-Calibrado": HoltWintersForecaster(seasonal_periods=12),
+            "Arima": ARIMAForecaster(order=(1, 1, 1)),
+            "Arima-Calibrado": ARIMAForecaster(order=(2, 1, 2)),
+        }
+        candidates = list(model_map.keys()) if model_name == "Mejor modelo automático" else [model_name]
+        sort_col = {"Holdout RMSE": "RMSE", "CV RMSE": "CV_RMSE"}.get(ranking_metric, "RMSE")
+
+        test_size = max(1, len(model_df) - int(round(len(model_df) * train_size)))
+        cv_test_size = max(1, min(test_size, (len(model_df) - lags) // (n_splits + 1)))
+
+        rows, detailed = [], {}
+        for name in candidates:
+            model = model_map[name]
+            preparer = DataPreparer(train_size=train_size, random_state=42)
+            runner = TimeSeriesRunner(
+                df=model_df, target=target_col, model=model,
+                lags=lags, preparer=preparer, test_size=test_size,
+            )
+            holdout = runner.evaluate()
+            cv = runner.evaluate_cv(n_splits=n_splits, test_size=cv_test_size)
+            runner.fit_full()
+            future = runner.forecast(steps=forecast_steps)
+            pred = runner.fit_predict()
+            y_test = runner.y_test
+            pred_index = runner.test_index
+
+            rows.append({
+                "Algoritmo": name,
+                "MAE": float(holdout.get("MAE", np.nan)),
+                "RMSE": float(holdout.get("RMSE", np.nan)),
+                "MAPE_%": float(holdout.get("MAPE_%", np.nan)),
+                "R2": float(holdout.get("R2", np.nan)),
+                "CV_MAE": float(cv.get("MAE", np.nan)),
+                "CV_RMSE": float(cv.get("RMSE", np.nan)),
+                "CV_MAPE_%": float(cv.get("MAPE_%", np.nan)),
+                "CV_R2": float(cv.get("R2", np.nan)),
+            })
+
+            pred_df_item = pd.DataFrame({
+                "date": data.loc[pred_index, date_col].values,
+                "actual": np.asarray(y_test),
+                "predicted": np.asarray(pred),
+            })
+            future_dates = pd.date_range(
+                data[date_col].max() + pd.Timedelta(days=1), periods=forecast_steps, freq="D"
+            )
+            future_df_item = pd.DataFrame({"date": future_dates, "forecast": np.asarray(future)})
+            detailed[name] = {"holdout": holdout, "cv": cv, "pred_df": pred_df_item, "future_df": future_df_item}
+
+        results_df_ts = pd.DataFrame(rows).sort_values(sort_col, ascending=True).reset_index(drop=True)
+        best_name_ts = results_df_ts.iloc[0]["Algoritmo"]
+        return {
+            "data": data, "results_df": results_df_ts, "best_name": best_name_ts,
+            "best_detail": detailed[best_name_ts], "detailed": detailed,
+            "ranking_metric_label": ranking_metric, "ranking_metric_column": sort_col,
+            "train_pct": train_pct, "test_pct": 100 - train_pct,
+            "lags": lags, "n_splits": n_splits, "forecast_steps": forecast_steps,
+            "date_col": date_col, "target_col": target_col,
+        }
+
+    # ── Validación de columnas disponibles ──
+    num_cols_ts = df_raw_ts.select_dtypes(include=np.number).columns.tolist()
+    date_candidates_ts = _ts_datetime_candidates(df_raw_ts)
+
+    if not date_candidates_ts or not num_cols_ts:
+        st.warning("El dataset necesita al menos una columna de fecha y una columna numérica.")
+        st.stop()
+
+    # ── Configuración ──
+    with st.expander("⚙️ Configuración del análisis", expanded=True):
+        cfg1, cfg2, cfg3 = st.columns(3)
+        with cfg1:
+            ts_date_col = st.selectbox("Columna de fecha", date_candidates_ts, key="ts_date_col")
+            ts_target_col = st.selectbox("Variable objetivo", num_cols_ts, key="ts_target_col")
+        with cfg2:
+            ts_model_name = st.selectbox("Algoritmo", [
+                "Mejor modelo automático", "DeepLearning (Red Neuronal)",
+                "HoltWinters", "HoltWinters-Calibrado", "Arima", "Arima-Calibrado",
+            ], key="ts_model")
+            ts_ranking = st.selectbox("Criterio de selección", ["Holdout RMSE", "CV RMSE"], key="ts_ranking")
+        with cfg3:
+            ts_lags = st.slider("Lags", 3, 30, 7, key="ts_lags")
+            ts_n_splits = st.slider("K-Folds temporales", 2, 10, 5, key="ts_splits")
+            ts_train_pct = st.slider("% Entrenamiento", 60, 90, 80, step=5, key="ts_train_pct")
+            ts_forecast = st.slider("Horizonte de predicción", 3, 30, 7, key="ts_forecast")
+        run_ts = st.button("▶ Ejecutar análisis", type="primary", key="ts_run")
+
+    if run_ts:
+        with st.spinner("Ejecutando análisis de series de tiempo..."):
+            try:
+                st.session_state["ts_analysis"] = _ts_run_analysis(
+                    df_raw_ts, ts_date_col, ts_target_col, ts_model_name,
+                    ts_ranking, ts_lags, ts_n_splits, ts_train_pct, ts_forecast,
+                )
+            except Exception as e:
+                st.error(f"Error en el análisis: {e}")
+
+    analysis_ts = st.session_state.get("ts_analysis")
+    if analysis_ts is None:
+        st.info("Configura los parámetros y presiona **▶ Ejecutar análisis** para comenzar.")
+        st.stop()
+
+    ts_data = analysis_ts["data"]
+    ts_results_df = analysis_ts["results_df"]
+    ts_best_name = analysis_ts["best_name"]
+    ts_best_detail = analysis_ts["best_detail"]
+    ts_date_out = analysis_ts["date_col"]
+    ts_target_out = analysis_ts["target_col"]
+
+    tab_eda_ts, tab_models_ts, tab_pred_ts = st.tabs(["EDA", "Modelos", "Predicciones"])
+
+    # ── Tab EDA ──
+    with tab_eda_ts:
+        null_vals_ts = int(ts_data[ts_target_out].isna().sum())
+        full_range_ts = pd.date_range(ts_data[ts_date_out].min(), ts_data[ts_date_out].max(), freq="D")
+        missing_dates_ts = int(len(full_range_ts.difference(pd.DatetimeIndex(ts_data[ts_date_out]))))
+
+        c1, c2, c3, c4 = st.columns(4, gap="medium")
+        with c1: metric_card("Registros", f"{len(ts_data):,}", "filas válidas", "#4f46e5")
+        with c2: metric_card("Valores nulos", str(null_vals_ts), f"{null_vals_ts/max(len(ts_data),1)*100:.2f}%", "#f59e0b")
+        with c3: metric_card("Fechas faltantes", str(missing_dates_ts), "vs frecuencia diaria", "#7c3aed")
+        with c4: metric_card("Frecuencia", _ts_frequency_hint(ts_data[ts_date_out]), "estimada", "#2563eb")
+
+        left, right = st.columns(2)
+        with left:
+            panel_open("Serie temporal completa")
+            fig_line_ts = viz.line_chart(ts_data, x=ts_date_out, y=ts_target_out, height=360)
+            st.plotly_chart(fig_line_ts, use_container_width=True)
+            panel_close()
+        with right:
+            panel_open("Distribución de la variable objetivo")
+            hist_vals_ts, edges_ts = np.histogram(ts_data[ts_target_out].dropna(), bins=8)
+            labels_ts = [f"{edges_ts[i]:.0f}-{edges_ts[i+1]:.0f}" for i in range(len(edges_ts) - 1)]
+            dist_df_ts = pd.DataFrame({"Rango": labels_ts, "Frecuencia": hist_vals_ts})
+            fig_hist_ts = viz.grouped_bar_chart(
+                dist_df_ts, x="Rango", y="Frecuencia", color="Rango", height=360, showlegend=False
+            )
+            st.plotly_chart(fig_hist_ts, use_container_width=True)
+            panel_close()
+
+        desc_ts = ts_data[ts_target_out].describe()
+        panel_open("Estadísticas descriptivas")
+        s1, s2, s3, s4, s5 = st.columns(5)
+        for col, (lbl, val) in zip([s1, s2, s3, s4, s5], [
+            ("Media", f"{desc_ts['mean']:.2f}"),
+            ("Mediana", f"{ts_data[ts_target_out].median():.2f}"),
+            ("Desv. Est.", f"{desc_ts['std']:.2f}"),
+            ("Mínimo", f"{desc_ts['min']:.2f}"),
+            ("Máximo", f"{desc_ts['max']:.2f}"),
+        ]):
+            with col: metric_card(lbl, val, "")
+        panel_close()
+
+    # ── Tab Modelos ──
+    with tab_models_ts:
+        best_row_ts = ts_results_df.iloc[0]
+        sort_col_ts = analysis_ts["ranking_metric_column"]
+
+        c1, c2, c3, c4 = st.columns(4, gap="medium")
+        with c1: metric_card("Mejor modelo", ts_best_name, f"por {analysis_ts['ranking_metric_label']}", "#4f46e5")
+        with c2: metric_card(analysis_ts["ranking_metric_label"], f"{best_row_ts[sort_col_ts]:.3f}", f"K-Folds: {analysis_ts['n_splits']}", "#2563eb")
+        with c3:
+            mae_v = best_row_ts["CV_MAE"] if sort_col_ts == "CV_RMSE" else best_row_ts["MAE"]
+            metric_card("MAE", f"{mae_v:.3f}", f"Lags: {analysis_ts['lags']}", "#10b981")
+        with c4:
+            mape_v = best_row_ts["CV_MAPE_%"] if sort_col_ts == "CV_RMSE" else best_row_ts["MAPE_%"]
+            metric_card("MAPE", f"{mape_v:.2f}%", f"Train/Test: {analysis_ts['train_pct']}/{analysis_ts['test_pct']}", "#7c3aed")
+
+        left, right = st.columns(2)
+        with left:
+            panel_open("Comparación de métricas por modelo")
+            metric_cols_ts = ["CV_RMSE", "CV_MAE", "CV_MAPE_%"] if sort_col_ts == "CV_RMSE" else ["RMSE", "MAE", "MAPE_%"]
+            metrics_long_ts = ts_results_df.melt(id_vars="Algoritmo", value_vars=metric_cols_ts, var_name="Métrica", value_name="Valor")
+            fig_bar_ts = viz.grouped_bar_chart(
+                metrics_long_ts, x="Algoritmo", y="Valor", color="Métrica", barmode="group", height=380
+            )
+            st.plotly_chart(fig_bar_ts, use_container_width=True)
+            panel_close()
+        with right:
+            panel_open("Real vs predicción (holdout)")
+            pred_df_ts = ts_best_detail["pred_df"]
+            fig_pred_ts = viz.multi_line_chart([
+                {"x": pred_df_ts["date"], "y": pred_df_ts["actual"], "mode": "lines+markers", "name": "Actual"},
+                {"x": pred_df_ts["date"], "y": pred_df_ts["predicted"], "mode": "lines+markers",
+                 "name": "Predicho", "line": dict(dash="dash")},
+            ], height=380)
+            st.plotly_chart(fig_pred_ts, use_container_width=True)
+            panel_close()
+
+        panel_open("Ranking de modelos")
+        disp_ts = ts_results_df.copy()
+        for c in ["MAE", "RMSE", "MAPE_%", "R2", "CV_MAE", "CV_RMSE", "CV_MAPE_%", "CV_R2"]:
+            disp_ts[c] = disp_ts[c].map(lambda x: round(float(x), 4) if pd.notna(x) else x)
+        st.dataframe(disp_ts, use_container_width=True, hide_index=True)
+        panel_close()
+
+    # ── Tab Predicciones ──
+    with tab_pred_ts:
+        future_df_ts = ts_best_detail["future_df"]
+        trend_ts = future_df_ts["forecast"].iloc[-1] - future_df_ts["forecast"].iloc[0]
+        trend_color = "#10b981" if trend_ts >= 0 else "#ef4444"
+
+        c1, c2, c3, c4 = st.columns(4, gap="medium")
+        with c1: metric_card("Modelo", ts_best_name, "seleccionado", "#4f46e5")
+        with c2: metric_card("Horizonte", f"{analysis_ts['forecast_steps']} pasos", "días proyectados", "#2563eb")
+        with c3: metric_card("Promedio proyectado", f"{future_df_ts['forecast'].mean():.2f}", "media del forecast", "#10b981")
+        with c4: metric_card("Tendencia", f"{trend_ts:+.2f}", "último - primer valor", trend_color)
+
+        hist_tail_ts = ts_data.tail(30).rename(columns={ts_date_out: "date", ts_target_out: "actual"})[["date", "actual"]]
+        hist_tail_ts["forecast"] = np.nan
+        fut_plot_ts = future_df_ts.copy()
+        fut_plot_ts["actual"] = np.nan
+        chart_df_ts = pd.concat([hist_tail_ts, fut_plot_ts], ignore_index=True)
+
+        panel_open("Serie histórica y pronóstico")
+        fig_fc_ts = viz.multi_line_chart([
+            {"x": chart_df_ts["date"], "y": chart_df_ts["actual"], "mode": "lines+markers", "name": "Histórico"},
+            {"x": chart_df_ts["date"], "y": chart_df_ts["forecast"], "mode": "lines+markers",
+             "name": "Forecast", "line": dict(dash="dash")},
+        ], height=420)
+        st.plotly_chart(fig_fc_ts, use_container_width=True)
+        panel_close()
+
+        panel_open("Predicciones detalladas")
+        pred_tbl_ts = future_df_ts.copy()
+        pred_tbl_ts["date"] = pred_tbl_ts["date"].dt.strftime("%Y-%m-%d")
+        pred_tbl_ts["forecast"] = pred_tbl_ts["forecast"].round(3)
+        st.dataframe(pred_tbl_ts, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Descargar forecast CSV",
+            pred_tbl_ts.to_csv(index=False).encode(),
+            "forecast.csv", "text/csv", key="ts_dl_fc",
+        )
+        panel_close()
