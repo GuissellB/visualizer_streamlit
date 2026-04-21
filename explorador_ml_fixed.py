@@ -30,7 +30,7 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 
 from ml_toolkit import (
     DataPreparer, SupervisedRunner, NeuralNetworkRunner,
-    UnsupervisedRunner, AssociationRulesExplorer, WebMiningToolkit,
+    UnsupervisedRunner, AssociationRulesExplorer,
     get_positive_score,
     ARIMAForecaster, EDAExplorer, HoltWintersForecaster, TimeSeriesRunner,
 )
@@ -107,8 +107,6 @@ _DEFAULTS: dict = {
     "nn_result": None, "tuning_result": None, "stability_df": None,
     "unsup_cluster_result": None, "unsup_dim_result": None,
     "assoc_rules": None, "assoc_itemsets": None,
-    "ws_texts": None, "ws_links": None, "ws_table": None,
-    "ws_records": None, "ws_regex_texts": [],
     "ts_analysis": None,
 }
 for _k, _v in _DEFAULTS.items():
@@ -150,6 +148,75 @@ def _apply_preprocessing() -> None:
     st.session_state["df"] = _df
 
 _apply_preprocessing()
+
+def _build_supervised_df(target: str, features: list[str] | None = None) -> tuple[pd.DataFrame, dict]:
+    """Construye un dataset de modelado evitando imputación global previa al split.
+
+    Reglas:
+    - parte del archivo original (df_raw)
+    - excluye columnas marcadas por el usuario
+    - elimina duplicados exactos
+    - elimina filas con target nulo
+    - codifica variables categóricas de entrada a numérico
+    - elimina filas con nulos restantes en las columnas realmente usadas
+    """
+    raw = st.session_state.get("df_raw")
+    if raw is None:
+        return pd.DataFrame(), {"rows_initial": 0, "rows_final": 0, "dropped_null_rows": 0}
+
+    df_model = raw.copy()
+    exclude = [c for c in st.session_state.get("_prep_cfg_exclude", []) if c in df_model.columns]
+    if exclude:
+        df_model = df_model.drop(columns=exclude)
+
+    rows_initial = len(df_model)
+    original_duplicates = int(df_model.duplicated().sum())
+    if original_duplicates:
+        df_model = df_model.drop_duplicates().reset_index(drop=True)
+
+    if target not in df_model.columns:
+        return pd.DataFrame(), {
+            "rows_initial": rows_initial,
+            "rows_final": 0,
+            "dropped_duplicates": original_duplicates,
+            "dropped_null_rows": 0,
+            "auto_ohe_columns": [],
+        }
+
+    # Target siempre sin nulos
+    before_target = len(df_model)
+    df_model = df_model.dropna(subset=[target]).copy()
+    dropped_target_nulls = before_target - len(df_model)
+
+    selected_features = [c for c in (features or []) if c in df_model.columns and c != target]
+    feature_cols = selected_features or [c for c in df_model.columns if c != target]
+
+    # En supervisado, toda feature categórica se codifica para evitar fallos del estimador.
+    cat_features = [c for c in feature_cols if str(df_model[c].dtype) in ("object", "category") or pd.api.types.is_object_dtype(df_model[c]) or pd.api.types.is_categorical_dtype(df_model[c])]
+    user_ohe = [c for c in st.session_state.get("_prep_cfg_ohe", []) if c in feature_cols]
+    auto_ohe_columns = sorted(set(cat_features) | set(user_ohe))
+    if auto_ohe_columns:
+        df_model = pd.get_dummies(df_model, columns=auto_ohe_columns, drop_first=False, dtype=int)
+
+    feature_cols_after = [c for c in df_model.columns if c != target]
+
+    # Para evitar leakage, no se imputa globalmente antes del split.
+    # Se eliminan filas con nulos en las columnas realmente usadas.
+    used_cols = [target] + feature_cols_after
+    before_dropna = len(df_model)
+    df_model = df_model.dropna(subset=used_cols).reset_index(drop=True)
+    dropped_null_rows = before_dropna - len(df_model)
+
+    meta = {
+        "rows_initial": rows_initial,
+        "rows_final": len(df_model),
+        "dropped_duplicates": original_duplicates,
+        "dropped_target_nulls": dropped_target_nulls,
+        "dropped_null_rows": dropped_null_rows,
+        "auto_ohe_columns": auto_ohe_columns,
+        "feature_count": len(feature_cols_after),
+    }
+    return df_model, meta
 
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 viz = Visualizer()
@@ -257,7 +324,7 @@ def _build_configured_model(nombre: str, rs: int, train_size: float, balance: st
     model = _clf_model(nombre, rs) if task == "classification" else _reg_model(nombre, rs)
 
     runner = SupervisedRunner(
-        df=st.session_state["df"],
+        df=_build_supervised_df(st.session_state["sup_target"], st.session_state["sup_features"] or [])[0],
         target=st.session_state["sup_target"],
         model=model,
         task=task,
@@ -358,7 +425,7 @@ def _build_best_model_search_grid(best_model_name: str, current_params: dict) ->
 
 def _run_best_model_search(best_model_name: str, seed: int, train_size: float, balance: str, task: str,
                            search_method: str, search_cv: int, scoring: str, param_grid: dict):
-    df_local = st.session_state["df"]
+    df_local = _build_supervised_df(st.session_state["sup_target"], st.session_state["sup_features"] or [])[0]
     target = st.session_state["sup_target"]
     features = st.session_state["sup_features"] or []
     pos_label = _coerce_pos_label(st.session_state["sup_pos_label"])
@@ -455,7 +522,7 @@ with st.sidebar:
     st.caption("Herramienta genérica de análisis de datos")
     page = st.radio(
         "Sección",
-        ["Datos", "EDA", "Supervisado", "No Supervisado", "Series de Tiempo", "Web Scraping"],
+        ["Datos", "EDA", "Supervisado", "No Supervisado", "Series de Tiempo"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -511,7 +578,7 @@ if page == "Datos":
         with c1: metric_card("Filas", f"{df.shape[0]:,}", "registros", "#4f46e5")
         with c2: metric_card("Columnas", str(df.shape[1]), "variables", "#2563eb")
         with c3: metric_card("Valores nulos", str(int(df.isnull().sum().sum())), "total en el dataset", "#f59e0b")
-        with c4: metric_card("Duplicados", str(int(df.duplicated().sum())), "filas repetidas", "#ef4444")
+        with c4: metric_card("Duplicados originales", str(original_dupes), f"actuales: {current_dupes}", "#ef4444")
 
         panel_open("Vista previa", f"Primeras 20 filas de {st.session_state['df_name']}")
         st.dataframe(df.head(20), use_container_width=True)
@@ -600,7 +667,7 @@ elif page == "EDA":
     with c1: metric_card("Numéricas", str(len(num_cols)), "columnas numéricas", "#4f46e5")
     with c2: metric_card("Categóricas", str(len(cat_cols)), "columnas no numéricas", "#7c3aed")
     with c3: metric_card("Valores nulos", str(int(df.isnull().sum().sum())), "total", "#f59e0b")
-    with c4: metric_card("Duplicados", str(int(df.duplicated().sum())), "filas repetidas", "#ef4444")
+    with c4: metric_card("Duplicados originales", str(original_dupes), f"actuales: {current_dupes}", "#ef4444")
 
     tab_stats, tab_dist, tab_corr, tab_cat = st.tabs(
         ["Estadísticas", "Distribuciones", "Correlación", "Categóricas"]
@@ -760,6 +827,21 @@ elif page == "Supervisado":
     n_splits    = st.session_state["sup_n_splits"]
     pos_label   = _coerce_pos_label(st.session_state["sup_pos_label"])
 
+    df_model, sup_meta = _build_supervised_df(target, features)
+    if df_model.empty:
+        st.error("No hay suficientes datos válidos para entrenar después del preprocesamiento de supervisado.")
+        st.stop()
+
+    st.info(
+        f"Modelado supervisado sin imputación global previa al split: "
+        f"{sup_meta['rows_final']:,} filas listas | "
+        f"duplicados eliminados: {sup_meta['dropped_duplicates']:,} | "
+        f"filas con target nulo: {sup_meta['dropped_target_nulls']:,} | "
+        f"filas con nulos restantes eliminadas: {sup_meta['dropped_null_rows']:,}."
+    )
+    if sup_meta.get("auto_ohe_columns"):
+        st.caption("Codificación automática para supervisado: " + ", ".join(sup_meta["auto_ohe_columns"][:12]) + ("..." if len(sup_meta["auto_ohe_columns"]) > 12 else ""))
+
     clf_names = ["Regresión Logística", "Random Forest", "SVM", "XGBoost", "LightGBM"]
     reg_names = ["Regresión Lineal", "Ridge", "Random Forest", "XGBoost", "LightGBM"]
     model_names = clf_names if task == "classification" else reg_names
@@ -780,7 +862,7 @@ elif page == "Supervisado":
                     prep  = DataPreparer(train_size=train_size, random_state=rs,
                                         scale_X=(name in _SCALE_MODELS))
                     runner = SupervisedRunner(
-                        df=df, target=target, model=model, task=task,
+                        df=df_model, target=target, model=model, task=task,
                         features=features, preparer=prep, pos_label=pos_label,
                         class_weight=bcfg["class_weight"] if task == "classification" else None,
                         sampling_method=bcfg["sampling_method"] if task == "classification" else None,
@@ -821,7 +903,7 @@ elif page == "Supervisado":
                     prep  = DataPreparer(train_size=train_size, random_state=rs,
                                         scale_X=(best_name in _SCALE_MODELS))
                     runner = SupervisedRunner(
-                        df=df, target=target, model=model, task=task,
+                        df=df_model, target=target, model=model, task=task,
                         features=features, preparer=prep, pos_label=pos_label,
                         class_weight=bcfg["class_weight"] if task == "classification" else None,
                         sampling_method=bcfg["sampling_method"] if task == "classification" else None,
@@ -951,7 +1033,7 @@ elif page == "Supervisado":
             try:
                 layers = tuple(int(x.strip()) for x in nn_layers.split(",") if x.strip())
                 runner_nn = NeuralNetworkRunner(
-                    df=df, target=target, task=task, features=features,
+                    df=df_model, target=target, task=task, features=features,
                     hidden_layer_sizes=layers, activation=nn_act,
                     solver=nn_solver, learning_rate_init=nn_lr,
                     max_iter=nn_iter, early_stopping=nn_early,
@@ -1133,7 +1215,7 @@ elif page == "Supervisado":
                         prep_s  = DataPreparer(train_size=train_size, random_state=seed,
                                                scale_X=(best_name_s in _SCALE_MODELS))
                         runner_s = SupervisedRunner(
-                            df=df, target=target, model=model_s, task=task,
+                            df=df_model, target=target, model=model_s, task=task,
                             features=features, preparer=prep_s, pos_label=pos_label,
                             class_weight=bcfg["class_weight"] if task == "classification" else None,
                             sampling_method=bcfg["sampling_method"] if task == "classification" else None,
@@ -1887,209 +1969,6 @@ elif page == "No Supervisado":
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 5) WEB SCRAPING
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "Web Scraping":
-    hero("Web Scraping", "Extrae datos de páginas web con WebMiningToolkit.")
-
-    url_input = st.text_input("URL a analizar", placeholder="https://ejemplo.com", key="ws_url")
-
-    tab_txt, tab_links, tab_table, tab_rec, tab_regex = st.tabs(
-        ["Texto", "Links", "Tabla HTML", "Registros", "Regex"]
-    )
-
-    # ── Texto ─────────────────────────────────────────────────────────────────
-    with tab_txt:
-        tw1, tw2 = st.columns([3, 1])
-        with tw1: css_sel   = st.text_input("Selector CSS", placeholder="p, h1, .title", key="ws_css")
-        with tw2: lim_txt   = st.number_input("Límite", 1, 500, 50, key="ws_lim")
-
-        if st.button("Extraer texto", type="primary", key="ws_fetch_txt"):
-            if not url_input:
-                st.error("Ingresa una URL.")
-            else:
-                try:
-                    wmt = WebMiningToolkit()
-                    with st.spinner("Descargando página..."):
-                        wmt.fetch(url_input)
-                        texts = wmt.extract_text(
-                            css_selector=css_sel.strip() or None,
-                            tag="p" if not css_sel.strip() else None,
-                            limit=int(lim_txt),
-                        )
-                    st.session_state["ws_texts"] = texts
-                    st.success(f"{len(texts)} elementos extraídos.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-        ws_texts = st.session_state.get("ws_texts")
-        if ws_texts is not None:
-            for i, t in enumerate(ws_texts[:40]):
-                if t.strip():
-                    st.markdown(f"**[{i+1}]** {t[:300]}")
-            txt_df = pd.DataFrame({"texto": ws_texts})
-            st.download_button("Descargar CSV", txt_df.to_csv(index=False).encode(),
-                               "textos.csv", "text/csv", key="ws_txt_dl")
-            if st.button("Usar como dataset activo", key="ws_txt_use"):
-                st.session_state["df"]      = txt_df
-                st.session_state["df_name"] = "texto_scrapeado.csv"
-                st.success("Dataset actualizado con el texto extraído.")
-
-    # ── Links ─────────────────────────────────────────────────────────────────
-    with tab_links:
-        href_filt = st.text_input("Filtrar hrefs que contengan", key="ws_href_filt")
-        if st.button("Extraer links", type="primary", key="ws_fetch_links"):
-            if not url_input:
-                st.error("Ingresa una URL.")
-            else:
-                try:
-                    wmt = WebMiningToolkit()
-                    with st.spinner("Descargando..."):
-                        wmt.fetch(url_input)
-                        links = wmt.extract_links(href_contains=href_filt.strip() or None)
-                    st.session_state["ws_links"] = links
-                    st.success(f"{len(links)} links encontrados.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-        ws_links = st.session_state.get("ws_links")
-        if ws_links:
-            ldf = pd.DataFrame({"href": ws_links})
-            st.dataframe(ldf, use_container_width=True)
-            st.download_button("Descargar CSV", ldf.to_csv(index=False).encode(),
-                               "links.csv", "text/csv", key="ws_lnk_dl")
-
-    # ── Tabla HTML ────────────────────────────────────────────────────────────
-    with tab_table:
-        t_idx = st.number_input("Índice de tabla (0 = primera)", 0, 20, 0, key="ws_tidx")
-        if st.button("Extraer tabla HTML", type="primary", key="ws_fetch_tbl"):
-            if not url_input:
-                st.error("Ingresa una URL.")
-            else:
-                try:
-                    wmt = WebMiningToolkit()
-                    with st.spinner("Descargando tabla..."):
-                        wmt.fetch(url_input)
-                        tbl = wmt.extract_table(index=int(t_idx))
-                    st.session_state["ws_table"] = tbl
-                    st.success(f"Tabla: {tbl.shape[0]} filas × {tbl.shape[1]} cols")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-        ws_tbl = st.session_state.get("ws_table")
-        if ws_tbl is not None:
-            st.dataframe(ws_tbl, use_container_width=True)
-            st.download_button("Descargar CSV", ws_tbl.to_csv(index=False).encode(),
-                               "tabla.csv", "text/csv", key="ws_tbl_dl")
-            if st.button("Usar como dataset activo", key="ws_tbl_use"):
-                st.session_state["df"]      = ws_tbl
-                st.session_state["df_name"] = "tabla_scrapeada.csv"
-                st.success("Dataset actualizado con la tabla extraída.")
-
-    # ── Registros ─────────────────────────────────────────────────────────────
-    with tab_rec:
-        st.caption("Define el selector del bloque repetido y los campos a extraer. Útil para catálogos y listados.")
-        item_sel = st.text_input("Selector del bloque repetido",
-                                 placeholder=".product, .item, li.card", key="ws_item_sel")
-        n_fields = int(st.number_input("Número de campos", 1, 10, 3, key="ws_nfields"))
-
-        fields: dict = {}
-        for i in range(n_fields):
-            rc1, rc2, rc3 = st.columns(3)
-            with rc1: fname = st.text_input(f"Campo {i+1}: nombre",    key=f"ws_fn_{i}", placeholder=f"campo_{i+1}")
-            with rc2: fsel  = st.text_input(f"Campo {i+1}: selector",  key=f"ws_fs_{i}", placeholder=".price, h2 a")
-            with rc3: fattr = st.text_input(f"Campo {i+1}: atributo",  key=f"ws_fa_{i}", value="text",
-                                            placeholder="text / href / src")
-            if fname.strip() and fsel.strip():
-                fields[fname.strip()] = {"selector": fsel.strip(), "attr": fattr.strip() or "text"}
-
-        if st.button("Extraer registros", type="primary", key="ws_fetch_rec"):
-            if not url_input:
-                st.error("Ingresa una URL.")
-            elif not item_sel or not fields:
-                st.error("Define el selector y al menos un campo.")
-            else:
-                try:
-                    wmt = WebMiningToolkit()
-                    with st.spinner("Extrayendo registros..."):
-                        wmt.fetch(url_input)
-                        rec_df = wmt.extract_records(item_selector=item_sel, fields=fields)
-                    st.session_state["ws_records"] = rec_df
-                    st.success(f"{len(rec_df)} registros extraídos.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-        ws_rec = st.session_state.get("ws_records")
-        if ws_rec is not None:
-            st.dataframe(ws_rec, use_container_width=True)
-            st.download_button("Descargar CSV", ws_rec.to_csv(index=False).encode(),
-                               "registros.csv", "text/csv", key="ws_rec_dl")
-            if st.button("Usar como dataset activo", key="ws_rec_use"):
-                st.session_state["df"]      = ws_rec
-                st.session_state["df_name"] = "registros_scrapeados.csv"
-                st.success("Dataset actualizado con los registros extraídos.")
-
-    # ── Regex ─────────────────────────────────────────────────────────────────
-    with tab_regex:
-        st.caption("Aplica operaciones regex sobre texto de una URL o sobre una columna del dataset activo.")
-
-        rg_src = st.radio("Fuente de texto",
-                          ["Extraer de URL", "Columna del dataset activo"], key="ws_rg_src")
-
-        if rg_src == "Columna del dataset activo":
-            if st.session_state["df"] is None:
-                st.warning("No hay dataset cargado.")
-                source_texts: list = []
-            else:
-                rg_col = st.selectbox("Columna", st.session_state["df"].columns.tolist(), key="ws_rg_col")
-                source_texts = st.session_state["df"][rg_col].dropna().astype(str).tolist()
-                st.caption(f"{len(source_texts)} textos listos.")
-        else:
-            rg_css = st.text_input("Selector CSS para extraer textos", placeholder="p, span", key="ws_rg_css")
-            if st.button("Cargar textos de URL", key="ws_rg_load"):
-                if url_input:
-                    try:
-                        wmt = WebMiningToolkit()
-                        wmt.fetch(url_input)
-                        loaded = wmt.extract_text(css_selector=rg_css.strip() or None,
-                                                  tag="p" if not rg_css.strip() else None)
-                        st.session_state["ws_regex_texts"] = loaded
-                        st.success(f"{len(loaded)} textos cargados.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-            source_texts = st.session_state.get("ws_regex_texts", [])
-
-        rp1, rp2 = st.columns(2)
-        with rp1: rg_pattern = st.text_input("Patrón regex", placeholder=r"\d+\.\d+", key="ws_rg_pat")
-        with rp2: rg_mode    = st.radio("Modo", ["Filtrar (search)", "Extraer grupos (extract)"], key="ws_rg_mode")
-
-        if st.button("Aplicar regex", type="primary", key="ws_apply_rg"):
-            if not rg_pattern:
-                st.error("Define un patrón.")
-            elif not source_texts:
-                st.warning("No hay textos para procesar.")
-            else:
-                try:
-                    wmt = WebMiningToolkit()
-                    if "Filtrar" in rg_mode:
-                        filtered = wmt.regex_filter(source_texts, rg_pattern)
-                        st.success(f"{len(filtered)} textos coinciden.")
-                        for t in filtered[:30]:
-                            st.markdown(f"- {t[:250]}")
-                    else:
-                        rg_df = wmt.regex_extract(source_texts, rg_pattern)
-                        if rg_df.empty:
-                            st.warning("Sin coincidencias.")
-                        else:
-                            st.success(f"{len(rg_df)} coincidencias.")
-                            st.dataframe(rg_df, use_container_width=True)
-                            st.download_button("Descargar CSV", rg_df.to_csv(index=False).encode(),
-                                               "regex_result.csv", "text/csv", key="ws_rg_dl")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 6) SERIES DE TIEMPO
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "Series de Tiempo":
     if not _require_df():

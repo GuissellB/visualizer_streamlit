@@ -427,10 +427,36 @@ class SupervisedRunner:
 
     def _y_transform(self, y: pd.Series) -> np.ndarray:
         if self.task == "classification":
-            if self.encode_target and (y.dtype == "object" or str(y.dtype).startswith("category")):
+            y_series = y.copy()
+
+            # Caso 1: etiquetas no numéricas
+            if y_series.dtype == "object" or str(y_series.dtype).startswith("category"):
                 self._label_encoder = LabelEncoder()
-                return self._label_encoder.fit_transform(y.values)
-            return y.values
+                y_enc = self._label_encoder.fit_transform(y_series.values)
+
+                try:
+                    if self.pos_label in list(self._label_encoder.classes_):
+                        self.pos_label = int(self._label_encoder.transform([self.pos_label])[0])
+                except Exception:
+                    pass
+
+                return y_enc
+
+            # Caso 2: etiquetas numéricas binarias, pero no son 0/1
+            y_num = pd.to_numeric(y_series, errors="coerce")
+            unique_vals = sorted(pd.Series(y_num).dropna().unique().tolist())
+
+            if len(unique_vals) == 2 and unique_vals != [0, 1]:
+                mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
+                y_mapped = y_num.map(mapping).values
+
+                if self.pos_label in mapping:
+                    self.pos_label = mapping[self.pos_label]
+
+                return y_mapped
+
+            return y_num.values
+
         return pd.to_numeric(y, errors="coerce").values
 
     def _use_stratify(self) -> bool:
