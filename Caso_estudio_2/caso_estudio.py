@@ -1,3 +1,6 @@
+# Desarrollado por: Guissell Betancur Oviedo y Anyelin Arias Camacho
+# Curso: Minería de Datos Avanzada
+
 """
 Caso de estudio integrado: Web Mining + Reglas de Asociación + Redes Neuronales.
 

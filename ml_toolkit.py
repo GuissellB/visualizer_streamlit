@@ -1,3 +1,6 @@
+# Desarrollado por: Guissell Betancur Oviedo y Anyelin Arias Camacho
+# Curso: Minería de Datos Avanzada
+
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass

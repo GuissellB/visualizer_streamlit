@@ -1,3 +1,6 @@
+# Desarrollado por: Guissell Betancur Oviedo y Anyelin Arias Camacho
+# Curso: Minería de Datos Avanzada
+
 import sys
 import warnings
 from pathlib import Path

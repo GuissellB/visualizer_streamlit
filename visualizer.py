@@ -1,3 +1,6 @@
+# Desarrollado por: Guissell Betancur Oviedo y Anyelin Arias Camacho
+# Curso: Minería de Datos Avanzada
+
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
